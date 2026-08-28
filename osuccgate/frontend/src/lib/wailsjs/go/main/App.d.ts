@@ -19,6 +19,10 @@ export function GetDashboardStats():Promise<db.DashboardStats>;
 
 export function GetRecentLogs(arg1:number):Promise<Array<db.AccessLog>>;
 
+export function ImportLogsCSV():Promise<string>;
+
+export function ImportUsersCSV():Promise<string>;
+
 export function ProcessSwipe(arg1:string):Promise<service.SwipeResponse>;
 
 export function SaveUser(arg1:db.RegisteredUser):Promise<void>;

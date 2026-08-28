@@ -34,6 +34,14 @@ export function GetRecentLogs(arg1) {
   return window['go']['main']['App']['GetRecentLogs'](arg1);
 }
 
+export function ImportLogsCSV() {
+  return window['go']['main']['App']['ImportLogsCSV']();
+}
+
+export function ImportUsersCSV() {
+  return window['go']['main']['App']['ImportUsersCSV']();
+}
+
 export function ProcessSwipe(arg1) {
   return window['go']['main']['App']['ProcessSwipe'](arg1);
 }

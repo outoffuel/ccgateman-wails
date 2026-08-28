@@ -68,6 +68,8 @@ export namespace db {
 	export class RegisteredUser {
 	    cardId: string;
 	    name: string;
+	    furigana: string;
+	    gender: string;
 	    roleName: string;
 	    roleCode: number;
 	    studentNo: string;
@@ -84,6 +86,8 @@ export namespace db {
 	        if ('string' === typeof source) source = JSON.parse(source);
 	        this.cardId = source["cardId"];
 	        this.name = source["name"];
+	        this.furigana = source["furigana"];
+	        this.gender = source["gender"];
 	        this.roleName = source["roleName"];
 	        this.roleCode = source["roleCode"];
 	        this.studentNo = source["studentNo"];
