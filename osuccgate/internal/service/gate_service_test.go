@@ -126,11 +126,12 @@ func TestGateService_CSVImportAndDualAuth(t *testing.T) {
 
 	svc := NewGateService(mgr)
 
-	// 1. 利用者CSVインポートテスト (BOM付き、カードID空、フリガナ、性別等)
-	userCSV := "\xEF\xBB\xBF学籍番号,氏名,フリガナ,性別,区分,カードID\n" +
-		"B2026001,山田 太郎,ヤマダ タロウ,男,学生,\n" +
-		"B2026002,佐藤 花子,サトウ ハナコ,女,学生スタッフ,NFC002\n" +
-		"T9999001,鈴木 一郎,スズキ イチロウ,男,教職員,MAG003\n"
+	// 1. 新フォーマット利用者CSVインポートテスト
+	// 管理番号,登録日,ID,氏名,フリガナ,性別,区分コード(1:学生 9:学生スタッフ 0:教職員),利用目的,連絡先
+	userCSV := "\xEF\xBB\xBF管理番号,登録日,ID,氏名,フリガナ,性別,区分コード,利用目的,連絡先\n" +
+		"100,2026/04/01,B2026001,山田 太郎,ヤマダ タロウ,男,1,プログラミング自習,090-1111-2222\n" +
+		",2026-04-02,B2026002,佐藤 花子,サトウ ハナコ,女,9,受付スタッフ業務,test@example.com\n" +
+		",2026/04/03 10:00:00,T9999001,鈴木 一郎,スズキ イチロウ,男,0,研究室利用,\n"
 
 	imported, total, err := svc.ImportUsersCSV([]byte(userCSV))
 	if err != nil {
@@ -140,30 +141,31 @@ func TestGateService_CSVImportAndDualAuth(t *testing.T) {
 		t.Errorf("Expected 3 imported users, got imported=%d, total=%d", imported, total)
 	}
 
-	// 2. 登録内容の検証
+	// 2. 登録内容および管理番号自動採番の検証
 	u1, err := mgr.GetUser("B2026001")
 	if err != nil || u1 == nil {
 		t.Fatalf("Failed to get user 1 by studentNo: %v", err)
 	}
-	if u1.CardID != "B2026001" || u1.Furigana != "ヤマダ タロウ" || u1.Gender != "男" || u1.RoleCode != 1 {
+	if u1.AdminNo != "100" || u1.Furigana != "ヤマダ タロウ" || u1.Gender != "男" || u1.RoleCode != 1 || u1.Purpose != "プログラミング自習" || u1.Contact != "090-1111-2222" {
 		t.Errorf("Unexpected user 1 data: %+v", u1)
 	}
 
-	// 3. 学籍番号とカードIDの双方からの認証照合テスト
-	// u2: StudentNo="B2026002", CardID="NFC002"
-	// (a) カードID "NFC002" で打刻
-	resA := svc.ProcessSwipe("NFC002")
-	if !resA.Success || resA.UserName != "佐藤 花子" || resA.EventType != "entry" {
-		t.Errorf("Failed swipe by CardID: %+v", resA)
+	u2, err := mgr.GetUser("B2026002")
+	if err != nil || u2 == nil {
+		t.Fatalf("Failed to get user 2 by studentNo: %v", err)
+	}
+	// 管理番号が空だったため 100 の次の 101 が自動採番されているはず
+	if u2.AdminNo != "101" || u2.RoleCode != 9 || u2.RoleName != "学生スタッフ" || u2.Contact != "test@example.com" {
+		t.Errorf("Unexpected user 2 data (auto adminNo): %+v", u2)
 	}
 
-	// (b) 学籍番号 "B2026002" で打刻 (退室になるはず)
-	time.Sleep(10 * time.Millisecond)
-	// デバウンスを回避するためにlastSwipesをリセットまたは別IDとして通過
-	svc.lastSwipes = make(map[string]time.Time)
-	resB := svc.ProcessSwipe("B2026002")
-	if !resB.Success || resB.UserName != "佐藤 花子" || resB.EventType != "exit" {
-		t.Errorf("Failed swipe by StudentNo: %+v", resB)
+	u3, err := mgr.GetUser("T9999001")
+	if err != nil || u3 == nil {
+		t.Fatalf("Failed to get user 3: %v", err)
+	}
+	// 管理番号が空だったため 102 が自動採番されているはず
+	if u3.AdminNo != "102" || u3.RoleCode != 0 || u3.RoleName != "教職員" || u3.Purpose != "研究室利用" {
+		t.Errorf("Unexpected user 3 data: %+v", u3)
 	}
 
 	// 4. ログCSVインポートテスト

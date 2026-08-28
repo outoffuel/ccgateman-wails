@@ -5,6 +5,8 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"strconv"
+	"strings"
 	"sync"
 	"time"
 
@@ -20,6 +22,9 @@ type RegisteredUser struct {
 	RoleName  string    `json:"roleName"`  // 教職員, 学生, 学生スタッフ 等
 	RoleCode  int       `json:"roleCode"`  // 0: 教職員, 1: 学生, 9: 学生スタッフ
 	StudentNo string    `json:"studentNo"` // 学籍番号/職員番号 (必須)
+	AdminNo   string    `json:"adminNo"`   // 管理番号 (自動採番 / CSV指定)
+	Purpose   string    `json:"purpose"`   // 利用目的
+	Contact   string    `json:"contact"`   // 連絡先 (電話番号/メール等)
 	CreatedAt time.Time `json:"createdAt"`
 	UpdatedAt time.Time `json:"updatedAt"`
 }
@@ -99,6 +104,9 @@ func (m *DBManager) createTables() error {
 		role_name TEXT NOT NULL,
 		role_code INTEGER NOT NULL DEFAULT 1, -- 0:教職員, 1:学生, 9:学生スタッフ
 		student_no TEXT NOT NULL DEFAULT '',
+		admin_no TEXT NOT NULL DEFAULT '',
+		purpose TEXT NOT NULL DEFAULT '',
+		contact TEXT NOT NULL DEFAULT '',
 		created_at DATETIME NOT NULL,
 		updated_at DATETIME NOT NULL
 	);
@@ -123,6 +131,9 @@ func (m *DBManager) createTables() error {
 	// 既存DB用カラムマイグレーション
 	_, _ = m.db.Exec(`ALTER TABLE registered_users ADD COLUMN furigana TEXT NOT NULL DEFAULT ''`)
 	_, _ = m.db.Exec(`ALTER TABLE registered_users ADD COLUMN gender TEXT NOT NULL DEFAULT ''`)
+	_, _ = m.db.Exec(`ALTER TABLE registered_users ADD COLUMN admin_no TEXT NOT NULL DEFAULT ''`)
+	_, _ = m.db.Exec(`ALTER TABLE registered_users ADD COLUMN purpose TEXT NOT NULL DEFAULT ''`)
+	_, _ = m.db.Exec(`ALTER TABLE registered_users ADD COLUMN contact TEXT NOT NULL DEFAULT ''`)
 	return nil
 }
 
@@ -131,12 +142,12 @@ func (m *DBManager) GetUser(identifier string) (*RegisteredUser, error) {
 	m.mu.RLock()
 	defer m.mu.RUnlock()
 
-	query := `SELECT card_id, name, furigana, gender, role_name, role_code, student_no, created_at, updated_at FROM registered_users WHERE card_id = ? OR (student_no != '' AND student_no = ?) LIMIT 1`
+	query := `SELECT card_id, name, furigana, gender, role_name, role_code, student_no, admin_no, purpose, contact, created_at, updated_at FROM registered_users WHERE card_id = ? OR (student_no != '' AND student_no = ?) LIMIT 1`
 	row := m.db.QueryRow(query, identifier, identifier)
 
 	var u RegisteredUser
 	var createdAtStr, updatedAtStr string
-	err := row.Scan(&u.CardID, &u.Name, &u.Furigana, &u.Gender, &u.RoleName, &u.RoleCode, &u.StudentNo, &createdAtStr, &updatedAtStr)
+	err := row.Scan(&u.CardID, &u.Name, &u.Furigana, &u.Gender, &u.RoleName, &u.RoleCode, &u.StudentNo, &u.AdminNo, &u.Purpose, &u.Contact, &createdAtStr, &updatedAtStr)
 	if err != nil {
 		if err == sql.ErrNoRows {
 			return nil, nil
@@ -159,7 +170,7 @@ func (m *DBManager) GetAllUsers() ([]RegisteredUser, error) {
 	m.mu.RLock()
 	defer m.mu.RUnlock()
 
-	query := `SELECT card_id, name, furigana, gender, role_name, role_code, student_no, created_at, updated_at FROM registered_users ORDER BY role_code ASC, student_no ASC, name ASC`
+	query := `SELECT card_id, name, furigana, gender, role_name, role_code, student_no, admin_no, purpose, contact, created_at, updated_at FROM registered_users ORDER BY role_code ASC, student_no ASC, name ASC`
 	rows, err := m.db.Query(query)
 	if err != nil {
 		return nil, err
@@ -170,7 +181,7 @@ func (m *DBManager) GetAllUsers() ([]RegisteredUser, error) {
 	for rows.Next() {
 		var u RegisteredUser
 		var createdAtStr, updatedAtStr string
-		if err := rows.Scan(&u.CardID, &u.Name, &u.Furigana, &u.Gender, &u.RoleName, &u.RoleCode, &u.StudentNo, &createdAtStr, &updatedAtStr); err != nil {
+		if err := rows.Scan(&u.CardID, &u.Name, &u.Furigana, &u.Gender, &u.RoleName, &u.RoleCode, &u.StudentNo, &u.AdminNo, &u.Purpose, &u.Contact, &createdAtStr, &updatedAtStr); err != nil {
 			return nil, err
 		}
 		u.CreatedAt, _ = time.Parse(time.RFC3339, createdAtStr)
@@ -186,6 +197,32 @@ func (m *DBManager) GetAllUsers() ([]RegisteredUser, error) {
 	return users, nil
 }
 
+// GetMaxAdminNo 既存ユーザーに設定されている管理番号の最大整数値を取得 (自動採番用)
+func (m *DBManager) GetMaxAdminNo() (int, error) {
+	m.mu.RLock()
+	defer m.mu.RUnlock()
+
+	rows, err := m.db.Query("SELECT admin_no FROM registered_users WHERE admin_no != ''")
+	if err != nil {
+		return 0, err
+	}
+	defer rows.Close()
+
+	maxNo := 0
+	for rows.Next() {
+		var s string
+		if err := rows.Scan(&s); err == nil {
+			s = strings.TrimSpace(s)
+			if n, err := strconv.Atoi(s); err == nil {
+				if n > maxNo {
+					maxNo = n
+				}
+			}
+		}
+	}
+	return maxNo, nil
+}
+
 // UpsertUser ユーザー登録・更新
 func (m *DBManager) UpsertUser(u *RegisteredUser) error {
 	m.mu.Lock()
@@ -197,8 +234,8 @@ func (m *DBManager) UpsertUser(u *RegisteredUser) error {
 
 	now := time.Now()
 	query := `
-	INSERT INTO registered_users (card_id, name, furigana, gender, role_name, role_code, student_no, created_at, updated_at)
-	VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+	INSERT INTO registered_users (card_id, name, furigana, gender, role_name, role_code, student_no, admin_no, purpose, contact, created_at, updated_at)
+	VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
 	ON CONFLICT(card_id) DO UPDATE SET
 		name = excluded.name,
 		furigana = excluded.furigana,
@@ -206,9 +243,12 @@ func (m *DBManager) UpsertUser(u *RegisteredUser) error {
 		role_name = excluded.role_name,
 		role_code = excluded.role_code,
 		student_no = excluded.student_no,
+		admin_no = CASE WHEN excluded.admin_no != '' THEN excluded.admin_no ELSE registered_users.admin_no END,
+		purpose = excluded.purpose,
+		contact = excluded.contact,
 		updated_at = excluded.updated_at
 	`
-	_, err := m.db.Exec(query, u.CardID, u.Name, u.Furigana, u.Gender, u.RoleName, u.RoleCode, u.StudentNo, now.Format(time.RFC3339), now.Format(time.RFC3339))
+	_, err := m.db.Exec(query, u.CardID, u.Name, u.Furigana, u.Gender, u.RoleName, u.RoleCode, u.StudentNo, u.AdminNo, u.Purpose, u.Contact, now.Format(time.RFC3339), now.Format(time.RFC3339))
 	return err
 }
 
@@ -224,8 +264,8 @@ func (m *DBManager) ImportUsers(users []RegisteredUser) (int, error) {
 	defer tx.Rollback()
 
 	stmt, err := tx.Prepare(`
-	INSERT INTO registered_users (card_id, name, furigana, gender, role_name, role_code, student_no, created_at, updated_at)
-	VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+	INSERT INTO registered_users (card_id, name, furigana, gender, role_name, role_code, student_no, admin_no, purpose, contact, created_at, updated_at)
+	VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
 	ON CONFLICT(card_id) DO UPDATE SET
 		name = excluded.name,
 		furigana = excluded.furigana,
@@ -233,6 +273,9 @@ func (m *DBManager) ImportUsers(users []RegisteredUser) (int, error) {
 		role_name = excluded.role_name,
 		role_code = excluded.role_code,
 		student_no = excluded.student_no,
+		admin_no = CASE WHEN excluded.admin_no != '' THEN excluded.admin_no ELSE registered_users.admin_no END,
+		purpose = excluded.purpose,
+		contact = excluded.contact,
 		updated_at = excluded.updated_at
 	`)
 	if err != nil {
@@ -258,7 +301,7 @@ func (m *DBManager) ImportUsers(users []RegisteredUser) (int, error) {
 		if updatedAt.IsZero() {
 			updatedAt = now
 		}
-		_, err := stmt.Exec(cardID, u.Name, u.Furigana, u.Gender, u.RoleName, u.RoleCode, u.StudentNo, createdAt.Format(time.RFC3339), updatedAt.Format(time.RFC3339))
+		_, err := stmt.Exec(cardID, u.Name, u.Furigana, u.Gender, u.RoleName, u.RoleCode, u.StudentNo, u.AdminNo, u.Purpose, u.Contact, createdAt.Format(time.RFC3339), updatedAt.Format(time.RFC3339))
 		if err != nil {
 			return count, err
 		}

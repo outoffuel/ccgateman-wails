@@ -29,6 +29,9 @@
   let formRoleName = '学生';
   let formRoleCode = 1;
   let formCardId = '';
+  let formAdminNo = '';
+  let formContact = '';
+  let formPurpose = '';
   let formError = '';
 
   let refreshTimer = null;
@@ -67,6 +70,9 @@
     formRoleName = '学生';
     formRoleCode = 1;
     formCardId = '';
+    formAdminNo = '';
+    formContact = '';
+    formPurpose = '';
     formError = '';
     isUserModalOpen = true;
   }
@@ -80,6 +86,9 @@
     formRoleName = u.roleName || '学生';
     formRoleCode = u.roleCode ?? 1;
     formCardId = u.cardId || '';
+    formAdminNo = u.adminNo || '';
+    formContact = u.contact || '';
+    formPurpose = u.purpose || '';
     formError = '';
     isUserModalOpen = true;
   }
@@ -112,7 +121,10 @@
         furigana: formFurigana.trim(),
         gender: formGender,
         roleName: formRoleName,
-        roleCode: Number(formRoleCode)
+        roleCode: Number(formRoleCode),
+        adminNo: formAdminNo.trim(),
+        contact: formContact.trim(),
+        purpose: formPurpose.trim()
       });
       isUserModalOpen = false;
       await loadData();
@@ -363,11 +375,14 @@
             <table class="w-full text-left text-sm text-slate-300">
               <thead class="text-xs text-slate-400 uppercase bg-slate-800/60 border-b border-slate-800">
                 <tr>
-                  <th class="p-3.5 rounded-l-xl">学籍/職員番号</th>
+                  <th class="p-3.5 rounded-l-xl">No.</th>
+                  <th class="p-3.5">学籍/職員番号</th>
                   <th class="p-3.5">氏名</th>
                   <th class="p-3.5">フリガナ</th>
                   <th class="p-3.5">性別</th>
                   <th class="p-3.5">区分</th>
+                  <th class="p-3.5">連絡先</th>
+                  <th class="p-3.5">利用目的</th>
                   <th class="p-3.5">識別カードID</th>
                   <th class="p-3.5 text-right rounded-r-xl">操作</th>
                 </tr>
@@ -375,6 +390,7 @@
               <tbody class="divide-y divide-slate-800/60">
                 {#each users as u}
                   <tr class="hover:bg-slate-800/40 transition">
+                    <td class="p-3.5 font-mono text-xs text-slate-400">{u.adminNo || '-'}</td>
                     <td class="p-3.5 font-mono font-bold text-white text-sm">{u.studentNo || '-'}</td>
                     <td class="p-3.5 font-bold text-white text-base">{u.name}</td>
                     <td class="p-3.5 text-xs text-slate-400">{u.furigana || '-'}</td>
@@ -392,6 +408,8 @@
                         {u.roleName}
                       </span>
                     </td>
+                    <td class="p-3.5 text-xs text-slate-300 max-w-[140px] truncate" title={u.contact || ''}>{u.contact || '-'}</td>
+                    <td class="p-3.5 text-xs text-slate-300 max-w-[160px] truncate" title={u.purpose || ''}>{u.purpose || '-'}</td>
                     <td class="p-3.5 font-mono text-xs text-slate-400">{u.cardId}</td>
                     <td class="p-3.5 text-right">
                       <button 
@@ -414,14 +432,17 @@
 
   <!-- ユーザー編集/登録モーダル -->
   {#if isUserModalOpen}
-    <div class="fixed inset-0 bg-slate-950/85 backdrop-blur-md flex items-center justify-center p-4 z-50 animate-fade">
-      <div class="bg-slate-900 border border-slate-700 rounded-3xl p-7 max-w-lg w-full shadow-2xl">
-        <h3 class="text-xl font-bold text-white mb-4">
-          {editingUser ? '利用者情報の編集' : '新規利用者の登録'}
+    <div class="fixed inset-0 bg-slate-950/80 backdrop-blur-md flex items-center justify-center p-4 z-50 animate-fade">
+      <div class="bg-slate-900 border border-slate-700 rounded-3xl p-6 sm:p-8 max-w-lg w-full shadow-2xl relative max-h-[90vh] overflow-y-auto">
+        <h3 class="text-xl font-black text-white mb-2 flex items-center gap-2">
+          {editingUser ? '👤 利用者情報の編集' : '✨ 新規利用者の登録'}
         </h3>
+        <p class="text-xs text-slate-400 mb-6">
+          {editingUser ? '登録情報を更新します' : '新しい利用者をマスターデータへ追加します'}
+        </p>
 
         {#if formError}
-          <div class="bg-rose-950/70 border border-rose-800 text-rose-300 text-xs p-3 rounded-xl mb-4">
+          <div class="bg-rose-950/60 border border-rose-800 text-rose-300 text-xs px-4 py-3 rounded-xl mb-4">
             {formError}
           </div>
         {/if}
@@ -516,6 +537,40 @@
             <p class="text-[11px] text-slate-400 mt-1">
               ※カードIDに入力がある場合、NFCと磁気リーダーの双方で学籍番号・カードIDから認証できます。
             </p>
+          </div>
+
+          <!-- 7. 連絡先 (任意) -->
+          <div>
+            <div class="flex items-center justify-between mb-1">
+              <label for="form-contact" class="block text-xs font-semibold text-slate-400 uppercase">
+                連絡先
+              </label>
+              <span class="text-[10px] text-slate-400 bg-slate-800 px-2 py-0.5 rounded">任意</span>
+            </div>
+            <input 
+              id="form-contact"
+              type="text" 
+              bind:value={formContact} 
+              placeholder="例: 090-1234-5678, user@example.com"
+              class="w-full bg-slate-800 border border-slate-700 text-white rounded-xl px-3.5 py-2.5 text-sm focus:outline-none focus:border-blue-500"
+            />
+          </div>
+
+          <!-- 8. 利用目的 (任意) -->
+          <div>
+            <div class="flex items-center justify-between mb-1">
+              <label for="form-purpose" class="block text-xs font-semibold text-slate-400 uppercase">
+                利用目的
+              </label>
+              <span class="text-[10px] text-slate-400 bg-slate-800 px-2 py-0.5 rounded">任意</span>
+            </div>
+            <input 
+              id="form-purpose"
+              type="text" 
+              bind:value={formPurpose} 
+              placeholder="例: 自習、プロジェクト活動、研究利用"
+              class="w-full bg-slate-800 border border-slate-700 text-white rounded-xl px-3.5 py-2.5 text-sm focus:outline-none focus:border-blue-500"
+            />
           </div>
         </div>
 

@@ -631,20 +631,26 @@ body { font-family: 'Noto Sans JP', 'Inter', sans-serif; background-color: #0f17
           <table class="w-full text-left text-sm text-slate-300">
             <thead class="text-xs text-slate-400 uppercase bg-slate-800/50">
               <tr>
+                <th class="p-3">No.</th>
                 <th class="p-3">識別ID (磁気/NFC)</th>
                 <th class="p-3">氏名</th>
                 <th class="p-3">区分 (コード)</th>
                 <th class="p-3">学籍/職員番号</th>
+                <th class="p-3">連絡先</th>
+                <th class="p-3">利用目的</th>
                 <th class="p-3 text-right">操作</th>
               </tr>
             </thead>
             <tbody class="divide-y divide-slate-800">
               ${users.map(u => ` + "`" + `
                 <tr class="hover:bg-slate-800/30">
+                  <td class="p-3 font-mono text-xs text-slate-400">${u.adminNo || '-'}</td>
                   <td class="p-3 font-mono text-xs text-slate-400">${u.cardId}</td>
                   <td class="p-3 font-bold text-white">${u.name}</td>
                   <td class="p-3"><span class="px-2 py-0.5 rounded text-xs ${u.roleCode === 0 ? 'bg-purple-900/50 text-purple-300' : (u.roleCode === 9 ? 'bg-emerald-900/50 text-emerald-300' : 'bg-slate-800 text-slate-300')}">${u.roleName} (${u.roleCode})</span></td>
                   <td class="p-3 font-mono">${u.studentNo || '-'}</td>
+                  <td class="p-3 text-xs text-slate-300">${u.contact || '-'}</td>
+                  <td class="p-3 text-xs text-slate-300">${u.purpose || '-'}</td>
                   <td class="p-3 text-right space-x-2">
                     <button onclick='editUser(${JSON.stringify(u)})' class="text-blue-400 hover:underline">編集</button>
                   </td>
@@ -660,7 +666,7 @@ body { font-family: 'Noto Sans JP', 'Inter', sans-serif; background-color: #0f17
       const modal = document.getElementById("modalContainer");
       modal.innerHTML = ` + "`" + `
         <div class="fixed inset-0 bg-slate-950/80 backdrop-blur-md flex items-center justify-center p-4 z-50">
-          <div class="bg-slate-900 border border-slate-700 rounded-2xl p-6 max-w-lg w-full shadow-2xl">
+          <div class="bg-slate-900 border border-slate-700 rounded-2xl p-6 max-w-lg w-full shadow-2xl max-h-[90vh] overflow-y-auto">
             <h3 class="text-xl font-bold text-white mb-4">${user ? '利用者情報の編集' : '新規利用者の登録'}</h3>
             <form id="userForm" class="space-y-4" onsubmit="saveUser(event)">
               <div>
@@ -675,8 +681,8 @@ body { font-family: 'Noto Sans JP', 'Inter', sans-serif; background-color: #0f17
                 <div>
                   <label class="block text-xs font-semibold text-slate-400 uppercase mb-1">区分名</label>
                   <select id="formRoleName" class="w-full bg-slate-800 border border-slate-700 text-white rounded-xl px-3 py-2" onchange="onRoleChange()">
-                    <option value="教職員" ${user && user.roleName === '教職員' ? 'selected' : ''}>教職員</option>
                     <option value="学生" ${(!user || user.roleName === '学生') ? 'selected' : ''}>学生</option>
+                    <option value="教職員" ${user && user.roleName === '教職員' ? 'selected' : ''}>教職員</option>
                     <option value="学生スタッフ" ${user && user.roleName === '学生スタッフ' ? 'selected' : ''}>学生スタッフ</option>
                   </select>
                 </div>
@@ -688,6 +694,14 @@ body { font-family: 'Noto Sans JP', 'Inter', sans-serif; background-color: #0f17
               <div>
                 <label class="block text-xs font-semibold text-slate-400 uppercase mb-1">学籍番号 / 職員番号</label>
                 <input type="text" id="formStudentNo" value="${user ? user.studentNo : ''}" class="w-full bg-slate-800 border border-slate-700 text-white rounded-xl px-3 py-2 font-mono" placeholder="任意">
+              </div>
+              <div>
+                <label class="block text-xs font-semibold text-slate-400 uppercase mb-1">連絡先 (任意)</label>
+                <input type="text" id="formContact" value="${user && user.contact ? user.contact : ''}" class="w-full bg-slate-800 border border-slate-700 text-white rounded-xl px-3 py-2 text-sm" placeholder="例: 090-1234-5678, user@example.com">
+              </div>
+              <div>
+                <label class="block text-xs font-semibold text-slate-400 uppercase mb-1">利用目的 (任意)</label>
+                <input type="text" id="formPurpose" value="${user && user.purpose ? user.purpose : ''}" class="w-full bg-slate-800 border border-slate-700 text-white rounded-xl px-3 py-2 text-sm" placeholder="例: 自習、プロジェクト活動">
               </div>
               <div class="flex justify-end gap-3 pt-4 border-t border-slate-800">
                 <button type="button" onclick="closeModal()" class="px-4 py-2 rounded-xl text-sm font-medium text-slate-400 hover:text-white">キャンセル</button>
@@ -719,7 +733,9 @@ body { font-family: 'Noto Sans JP', 'Inter', sans-serif; background-color: #0f17
         name: document.getElementById("formName").value.trim(),
         roleName: document.getElementById("formRoleName").value,
         roleCode: parseInt(document.getElementById("formRoleCode").value, 10),
-        studentNo: document.getElementById("formStudentNo").value.trim()
+        studentNo: document.getElementById("formStudentNo").value.trim(),
+        contact: document.getElementById("formContact").value.trim(),
+        purpose: document.getElementById("formPurpose").value.trim()
       };
       const res = await fetch(API_BASE + '/api/users', {
         method: 'POST',

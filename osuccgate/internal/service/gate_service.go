@@ -260,7 +260,38 @@ func sanitizeCSVData(data []byte) ([]byte, error) {
 	return data, nil
 }
 
+// parseCustomDate 多様な日時フォーマットをパースするヘルパー
+func parseCustomDate(val string) time.Time {
+	val = strings.TrimSpace(val)
+	if val == "" {
+		return time.Now()
+	}
+	formats := []string{
+		"2006/01/02 15:04:05",
+		"2006-01-02 15:04:05",
+		"2006/1/2 15:04:05",
+		"2006-1-2 15:04:05",
+		"2006/01/02 15:04",
+		"2006-01-02 15:04",
+		"2006/1/2 15:04",
+		"2006-1-2 15:04",
+		"2006/01/02",
+		"2006-01-02",
+		"2006/1/2",
+		"2006-1-2",
+		"20060102",
+		time.RFC3339,
+	}
+	for _, f := range formats {
+		if t, err := time.ParseInLocation(f, val, time.Local); err == nil {
+			return t
+		}
+	}
+	return time.Now()
+}
+
 // ImportUsersCSV CSVデータから利用者を一括インポート
+// フォーマット: 管理番号,登録日,ID,氏名,フリガナ,性別,区分コード(1:学生 9:学生スタッフ 0:教職員),利用目的,連絡先
 func (s *GateService) ImportUsersCSV(csvData []byte) (int, int, error) {
 	cleanData, err := sanitizeCSVData(csvData)
 	if err != nil {
@@ -294,29 +325,61 @@ func (s *GateService) ImportUsersCSV(csvData []byte) (int, int, error) {
 		cleaned = strings.ReplaceAll(cleaned, "（", "(")
 		cleaned = strings.ReplaceAll(cleaned, "）", ")")
 
-		if strings.Contains(cleaned, "学籍") || strings.Contains(cleaned, "学生番号") || strings.Contains(cleaned, "職員番号") || cleaned == "studentno" || cleaned == "studentid" {
-			headerMap["student_no"] = colIdx
+		if strings.Contains(cleaned, "管理番号") || strings.Contains(cleaned, "管理no") || cleaned == "adminno" || cleaned == "no" || cleaned == "番号" {
+			headerMap["admin_no"] = colIdx
 			isHeader = true
-		} else if strings.Contains(cleaned, "フリガナ") || strings.Contains(cleaned, "ふりがな") || strings.Contains(cleaned, "カナ") || strings.Contains(cleaned, "かな") || cleaned == "furigana" || cleaned == "kana" {
-			headerMap["furigana"] = colIdx
+		} else if strings.Contains(cleaned, "登録日") || strings.Contains(cleaned, "登録日時") || strings.Contains(cleaned, "作成日") || cleaned == "createdat" || cleaned == "date" {
+			headerMap["created_at"] = colIdx
+			isHeader = true
+		} else if strings.Contains(cleaned, "学籍") || strings.Contains(cleaned, "学生番号") || strings.Contains(cleaned, "職員番号") || cleaned == "id" || cleaned == "studentid" || cleaned == "studentno" || cleaned == "cardid" || strings.Contains(cleaned, "カード") || strings.Contains(cleaned, "識別") {
+			headerMap["student_no"] = colIdx
 			isHeader = true
 		} else if strings.Contains(cleaned, "氏名") || strings.Contains(cleaned, "名前") || strings.Contains(cleaned, "ユーザー名") || cleaned == "name" || cleaned == "username" {
 			headerMap["name"] = colIdx
 			isHeader = true
+		} else if strings.Contains(cleaned, "フリガナ") || strings.Contains(cleaned, "ふりがな") || strings.Contains(cleaned, "カナ") || strings.Contains(cleaned, "かな") || cleaned == "furigana" || cleaned == "kana" {
+			headerMap["furigana"] = colIdx
+			isHeader = true
 		} else if strings.Contains(cleaned, "性別") || strings.Contains(cleaned, "性") || cleaned == "gender" || cleaned == "sex" {
 			headerMap["gender"] = colIdx
 			isHeader = true
-		} else if strings.Contains(cleaned, "区分") || strings.Contains(cleaned, "ロール") || strings.Contains(cleaned, "役職") || strings.Contains(cleaned, "属性") || cleaned == "role" || cleaned == "rolename" {
+		} else if strings.Contains(cleaned, "区分") || strings.Contains(cleaned, "ロール") || strings.Contains(cleaned, "役職") || strings.Contains(cleaned, "属性") || cleaned == "role" || cleaned == "rolecode" || cleaned == "rolename" {
 			headerMap["role_name"] = colIdx
 			isHeader = true
-		} else if strings.Contains(cleaned, "カード") || strings.Contains(cleaned, "識別") || strings.Contains(cleaned, "idm") || strings.Contains(cleaned, "nfc") || cleaned == "cardid" {
-			headerMap["card_id"] = colIdx
+		} else if strings.Contains(cleaned, "利用目的") || strings.Contains(cleaned, "目的") || cleaned == "purpose" {
+			headerMap["purpose"] = colIdx
+			isHeader = true
+		} else if strings.Contains(cleaned, "連絡先") || strings.Contains(cleaned, "電話番号") || strings.Contains(cleaned, "メール") || cleaned == "contact" || cleaned == "tel" || cleaned == "phone" || cleaned == "email" {
+			headerMap["contact"] = colIdx
 			isHeader = true
 		}
 	}
 
 	if isHeader {
 		startIdx = 1
+	}
+
+	// 既存DBの管理番号の最大整数値を取得（自動採番・振り直し用）
+	currentMaxAdminNo := 0
+	if s.dbManager != nil {
+		currentMaxAdminNo, _ = s.dbManager.GetMaxAdminNo()
+	}
+
+	// CSV内で指定されている既存の数値管理番号があれば最大値を把握
+	for i := startIdx; i < len(rows); i++ {
+		row := rows[i]
+		if len(row) == 0 {
+			continue
+		}
+		var aNoStr string
+		if idx, ok := headerMap["admin_no"]; ok && idx < len(row) {
+			aNoStr = strings.TrimSpace(row[idx])
+		} else if !isHeader && 0 < len(row) {
+			aNoStr = strings.TrimSpace(row[0])
+		}
+		if n, err := strconv.Atoi(aNoStr); err == nil && n > currentMaxAdminNo {
+			currentMaxAdminNo = n
+		}
 	}
 
 	var users []db.RegisteredUser
@@ -336,32 +399,37 @@ func (s *GateService) ImportUsersCSV(csvData []byte) (int, int, error) {
 			return ""
 		}
 
-		studentNo := getCol("student_no", 0)
-		name := getCol("name", 1)
-		furigana := getCol("furigana", 2)
-		gender := getCol("gender", 3)
-		roleStr := getCol("role_name", 4)
-		cardID := getCol("card_id", 5)
+		// 0: 管理番号, 1: 登録日, 2: ID, 3: 氏名, 4: フリガナ, 5: 性別, 6: 区分コード, 7: 利用目的, 8: 連絡先
+		adminNo := getCol("admin_no", 0)
+		createdAtStr := getCol("created_at", 1)
+		studentNo := getCol("student_no", 2)
+		name := getCol("name", 3)
+		furigana := getCol("furigana", 4)
+		gender := getCol("gender", 5)
+		roleStr := getCol("role_name", 6)
+		purpose := getCol("purpose", 7)
+		contact := getCol("contact", 8)
 
-		if studentNo == "" && name == "" && cardID == "" {
+		if studentNo == "" && name == "" && adminNo == "" {
 			continue // 空行スキップ
 		}
 
-		// 学籍番号がないがカードIDがある場合は学籍番号にカードIDを設定
-		if studentNo == "" && cardID != "" {
-			studentNo = cardID
+		// カードIDおよび学籍番号
+		cardID := studentNo
+		if studentNo == "" && cardID == "" {
+			continue // IDが特定できない行はスキップ
 		}
 
-		// カードIDが空の場合は学籍番号と同じ値を扱う
-		if cardID == "" {
-			cardID = studentNo
+		// 管理番号がない場合はシステム側で自動連番採番
+		if adminNo == "" {
+			currentMaxAdminNo++
+			adminNo = strconv.Itoa(currentMaxAdminNo)
 		}
 
-		if studentNo == "" {
-			continue // 学籍番号/カードIDが特定できないものはスキップ
-		}
+		// 登録日のパース
+		createdAt := parseCustomDate(createdAtStr)
 
-		// 区分・ロールコードの解決
+		// 区分・ロールコードの解決 (0: 教職員, 1: 学生, 9: 学生スタッフ)
 		roleName := "学生"
 		roleCode := 1
 		roleTrimmed := strings.TrimSpace(roleStr)
@@ -379,9 +447,9 @@ func (s *GateService) ImportUsersCSV(csvData []byte) (int, int, error) {
 
 		// 性別の正規化
 		genderNorm := ""
-		if strings.Contains(gender, "男") || strings.ToLower(gender) == "male" || strings.ToLower(gender) == "m" {
+		if strings.Contains(gender, "男") || strings.ToLower(gender) == "male" || strings.ToLower(gender) == "m" || gender == "1" {
 			genderNorm = "男"
-		} else if strings.Contains(gender, "女") || strings.ToLower(gender) == "female" || strings.ToLower(gender) == "f" {
+		} else if strings.Contains(gender, "女") || strings.ToLower(gender) == "female" || strings.ToLower(gender) == "f" || gender == "2" {
 			genderNorm = "女"
 		} else {
 			genderNorm = gender
@@ -395,6 +463,11 @@ func (s *GateService) ImportUsersCSV(csvData []byte) (int, int, error) {
 			RoleName:  roleName,
 			RoleCode:  roleCode,
 			StudentNo: studentNo,
+			AdminNo:   adminNo,
+			Purpose:   purpose,
+			Contact:   contact,
+			CreatedAt: createdAt,
+			UpdatedAt: time.Now(),
 		})
 	}
 

@@ -73,6 +73,9 @@ export namespace db {
 	    roleName: string;
 	    roleCode: number;
 	    studentNo: string;
+	    adminNo: string;
+	    purpose: string;
+	    contact: string;
 	    // Go type: time
 	    createdAt: any;
 	    // Go type: time
@@ -91,6 +94,9 @@ export namespace db {
 	        this.roleName = source["roleName"];
 	        this.roleCode = source["roleCode"];
 	        this.studentNo = source["studentNo"];
+	        this.adminNo = source["adminNo"];
+	        this.purpose = source["purpose"];
+	        this.contact = source["contact"];
 	        this.createdAt = this.convertValues(source["createdAt"], null);
 	        this.updatedAt = this.convertValues(source["updatedAt"], null);
 	    }
