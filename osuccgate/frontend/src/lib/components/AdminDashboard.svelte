@@ -22,11 +22,13 @@
   // ユーザー編集/登録用モーダルステート
   let isUserModalOpen = false;
   let editingUser = null;
-  let formCardId = '';
+  let formStudentNo = '';
   let formName = '';
+  let formFurigana = '';
+  let formGender = '男';
   let formRoleName = '学生';
   let formRoleCode = 1;
-  let formStudentNo = '';
+  let formCardId = '';
   let formError = '';
 
   let refreshTimer = null;
@@ -58,22 +60,26 @@
 
   function openNewUserModal() {
     editingUser = null;
-    formCardId = '';
+    formStudentNo = '';
     formName = '';
+    formFurigana = '';
+    formGender = '男';
     formRoleName = '学生';
     formRoleCode = 1;
-    formStudentNo = '';
+    formCardId = '';
     formError = '';
     isUserModalOpen = true;
   }
 
   function openEditUserModal(u) {
     editingUser = u;
-    formCardId = u.cardId;
-    formName = u.name;
-    formRoleName = u.roleName;
-    formRoleCode = u.roleCode;
     formStudentNo = u.studentNo || '';
+    formName = u.name || '';
+    formFurigana = u.furigana || '';
+    formGender = u.gender || '男';
+    formRoleName = u.roleName || '学生';
+    formRoleCode = u.roleCode ?? 1;
+    formCardId = u.cardId || '';
     formError = '';
     isUserModalOpen = true;
   }
@@ -86,18 +92,27 @@
   }
 
   async function handleSaveUser() {
-    if (!formCardId.trim() || !formName.trim()) {
-      formError = 'カードIDと氏名は必須です';
+    if (!formStudentNo.trim()) {
+      formError = '学籍番号 / 職員番号は必須です';
+      return;
+    }
+    if (!formName.trim()) {
+      formError = '氏名は必須です';
       return;
     }
 
+    // カードIDが空の場合は学籍番号と同一の値を自動適用
+    const finalCardId = formCardId.trim() || formStudentNo.trim();
+
     try {
       await SaveUser({
-        cardId: formCardId.trim(),
+        cardId: finalCardId,
+        studentNo: formStudentNo.trim(),
         name: formName.trim(),
+        furigana: formFurigana.trim(),
+        gender: formGender,
         roleName: formRoleName,
-        roleCode: Number(formRoleCode),
-        studentNo: formStudentNo.trim()
+        roleCode: Number(formRoleCode)
       });
       isUserModalOpen = false;
       await loadData();
@@ -348,24 +363,36 @@
             <table class="w-full text-left text-sm text-slate-300">
               <thead class="text-xs text-slate-400 uppercase bg-slate-800/60 border-b border-slate-800">
                 <tr>
-                  <th class="p-3.5 rounded-l-xl">識別ID (磁気/NFC)</th>
+                  <th class="p-3.5 rounded-l-xl">学籍/職員番号</th>
                   <th class="p-3.5">氏名</th>
-                  <th class="p-3.5">区分 (コード)</th>
-                  <th class="p-3.5">学籍/職員番号</th>
+                  <th class="p-3.5">フリガナ</th>
+                  <th class="p-3.5">性別</th>
+                  <th class="p-3.5">区分</th>
+                  <th class="p-3.5">識別カードID</th>
                   <th class="p-3.5 text-right rounded-r-xl">操作</th>
                 </tr>
               </thead>
               <tbody class="divide-y divide-slate-800/60">
                 {#each users as u}
                   <tr class="hover:bg-slate-800/40 transition">
-                    <td class="p-3.5 font-mono text-xs text-slate-400">{u.cardId}</td>
+                    <td class="p-3.5 font-mono font-bold text-white text-sm">{u.studentNo || '-'}</td>
                     <td class="p-3.5 font-bold text-white text-base">{u.name}</td>
+                    <td class="p-3.5 text-xs text-slate-400">{u.furigana || '-'}</td>
+                    <td class="p-3.5 text-xs">
+                      {#if u.gender}
+                        <span class={`px-2 py-0.5 rounded-full text-xs font-semibold ${u.gender === '男' ? 'bg-blue-950 text-blue-300 border border-blue-800' : (u.gender === '女' ? 'bg-pink-950 text-pink-300 border border-pink-800' : 'bg-slate-800 text-slate-300')}`}>
+                          {u.gender}
+                        </span>
+                      {:else}
+                        <span class="text-slate-500">-</span>
+                      {/if}
+                    </td>
                     <td class="p-3.5">
                       <span class={`px-2.5 py-1 rounded-full text-xs font-semibold ${u.roleCode === 0 ? 'bg-purple-950 text-purple-300 border border-purple-800' : (u.roleCode === 9 ? 'bg-emerald-950 text-emerald-300 border border-emerald-800' : 'bg-slate-800 text-slate-300')}`}>
-                        {u.roleName} ({u.roleCode})
+                        {u.roleName}
                       </span>
                     </td>
-                    <td class="p-3.5 font-mono text-slate-300">{u.studentNo || '-'}</td>
+                    <td class="p-3.5 font-mono text-xs text-slate-400">{u.cardId}</td>
                     <td class="p-3.5 text-right">
                       <button 
                         on:click={() => openEditUserModal(u)}
@@ -400,22 +427,27 @@
         {/if}
 
         <div class="space-y-4">
+          <!-- 1. 学籍番号 (必須) -->
           <div>
-            <label class="block text-xs font-semibold text-slate-400 uppercase mb-1">
-              識別カードID (磁気カード番号 / NFC IDm) *
+            <label for="form-student-no" class="block text-xs font-semibold text-slate-400 uppercase mb-1">
+              学籍番号 / 職員番号 <span class="text-rose-400">*</span>
             </label>
             <input 
+              id="form-student-no"
               type="text" 
-              bind:value={formCardId} 
-              disabled={!!editingUser}
-              placeholder="カードを通すか直接入力"
-              class="w-full bg-slate-800 border border-slate-700 text-white rounded-xl px-3.5 py-2.5 font-mono text-sm focus:outline-none focus:border-blue-500 disabled:opacity-50"
+              bind:value={formStudentNo} 
+              placeholder="例: B2026001"
+              class="w-full bg-slate-800 border border-slate-700 text-white rounded-xl px-3.5 py-2.5 font-mono text-sm focus:outline-none focus:border-blue-500"
             />
           </div>
 
+          <!-- 2. 氏名 (必須) -->
           <div>
-            <label class="block text-xs font-semibold text-slate-400 uppercase mb-1">氏名 *</label>
+            <label for="form-user-name" class="block text-xs font-semibold text-slate-400 uppercase mb-1">
+              氏名 <span class="text-rose-400">*</span>
+            </label>
             <input 
+              id="form-user-name"
               type="text" 
               bind:value={formName} 
               placeholder="例: 山田 太郎"
@@ -423,39 +455,67 @@
             />
           </div>
 
+          <!-- 3. フリガナ -->
+          <div>
+            <label for="form-furigana" class="block text-xs font-semibold text-slate-400 uppercase mb-1">
+              フリガナ
+            </label>
+            <input 
+              id="form-furigana"
+              type="text" 
+              bind:value={formFurigana} 
+              placeholder="例: ヤマダ タロウ"
+              class="w-full bg-slate-800 border border-slate-700 text-white rounded-xl px-3.5 py-2.5 text-sm focus:outline-none focus:border-blue-500"
+            />
+          </div>
+
+          <!-- 4. 性別 & 5. 区分 -->
           <div class="grid grid-cols-2 gap-4">
             <div>
-              <label class="block text-xs font-semibold text-slate-400 uppercase mb-1">区分名</label>
+              <label for="form-gender" class="block text-xs font-semibold text-slate-400 uppercase mb-1">性別</label>
               <select 
-                bind:value={formRoleName} 
-                on:change={handleRoleChange}
+                id="form-gender"
+                bind:value={formGender} 
                 class="w-full bg-slate-800 border border-slate-700 text-white rounded-xl px-3.5 py-2.5 text-sm focus:outline-none focus:border-blue-500"
               >
-                <option value="教職員">教職員</option>
-                <option value="学生">学生</option>
-                <option value="学生スタッフ">学生スタッフ</option>
+                <option value="男">男</option>
+                <option value="女">女</option>
               </select>
             </div>
 
             <div>
-              <label class="block text-xs font-semibold text-slate-400 uppercase mb-1">ロールコード</label>
-              <input 
-                type="number" 
-                bind:value={formRoleCode} 
-                readonly
-                class="w-full bg-slate-800/50 border border-slate-700 text-slate-400 rounded-xl px-3.5 py-2.5 text-sm font-mono focus:outline-none"
-              />
+              <label for="form-role-name" class="block text-xs font-semibold text-slate-400 uppercase mb-1">区分</label>
+              <select 
+                id="form-role-name"
+                bind:value={formRoleName} 
+                on:change={handleRoleChange}
+                class="w-full bg-slate-800 border border-slate-700 text-white rounded-xl px-3.5 py-2.5 text-sm focus:outline-none focus:border-blue-500"
+              >
+                <option value="学生">学生</option>
+                <option value="教職員">教職員</option>
+                <option value="学生スタッフ">学生スタッフ</option>
+              </select>
             </div>
           </div>
 
+          <!-- 6. カードID (任意) -->
           <div>
-            <label class="block text-xs font-semibold text-slate-400 uppercase mb-1">学籍番号 / 職員番号 (任意)</label>
+            <div class="flex items-center justify-between mb-1">
+              <label for="form-card-id" class="block text-xs font-semibold text-slate-400 uppercase">
+                識別カードID (NFC IDm / 磁気カード番号)
+              </label>
+              <span class="text-[10px] text-slate-400 bg-slate-800 px-2 py-0.5 rounded">任意 (未入力時は学籍番号)</span>
+            </div>
             <input 
+              id="form-card-id"
               type="text" 
-              bind:value={formStudentNo} 
-              placeholder="例: B2026001"
+              bind:value={formCardId} 
+              placeholder="空欄の場合は学籍番号と同じ値を扱います (NFC/磁気併用時に指定)"
               class="w-full bg-slate-800 border border-slate-700 text-white rounded-xl px-3.5 py-2.5 font-mono text-sm focus:outline-none focus:border-blue-500"
             />
+            <p class="text-[11px] text-slate-400 mt-1">
+              ※カードIDに入力がある場合、NFCと磁気リーダーの双方で学籍番号・カードIDから認証できます。
+            </p>
           </div>
         </div>
 

@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"io"
 	"log"
 	"net/http"
 	"osuccgate/internal/db"
@@ -61,6 +62,8 @@ func (s *HTTPServer) Start() {
 	handleWithCORS("/api/inside", s.handleInsideUsers)
 	handleWithCORS("/api/force-exit", s.handleForceExit)
 	handleWithCORS("/api/export/csv", s.handleExportCSV)
+	handleWithCORS("/api/import/users", s.handleImportUsers)
+	handleWithCORS("/api/import/logs", s.handleImportLogs)
 
 	// Web管理者画面 SPA
 	mux.HandleFunc("/", s.handleWebAdminSPA)
@@ -263,6 +266,110 @@ func (s *HTTPServer) handleExportCSV(w http.ResponseWriter, r *http.Request) {
 	w.Header().Set("Content-Disposition", fmt.Sprintf("attachment; filename=\"%s\"", fileName))
 	w.Header().Set("Content-Length", strconv.Itoa(len(csvBytes)))
 	w.Write(csvBytes)
+}
+
+func (s *HTTPServer) handleImportUsers(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodPost {
+		http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
+		return
+	}
+	if !s.checkPIN(r) {
+		http.Error(w, "Unauthorized PIN", http.StatusUnauthorized)
+		return
+	}
+
+	var data []byte
+	if strings.HasPrefix(r.Header.Get("Content-Type"), "multipart/form-data") {
+		file, _, err := r.FormFile("file")
+		if err != nil {
+			http.Error(w, "File not provided: "+err.Error(), http.StatusBadRequest)
+			return
+		}
+		defer file.Close()
+		data, err = io.ReadAll(file)
+		if err != nil {
+			http.Error(w, "Failed to read file: "+err.Error(), http.StatusInternalServerError)
+			return
+		}
+	} else {
+		var err error
+		data, err = io.ReadAll(r.Body)
+		if err != nil {
+			http.Error(w, "Failed to read body: "+err.Error(), http.StatusInternalServerError)
+			return
+		}
+	}
+
+	imported, total, err := s.gateService.ImportUsersCSV(data)
+	if err != nil {
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(http.StatusBadRequest)
+		json.NewEncoder(w).Encode(map[string]interface{}{
+			"success": false,
+			"error":   err.Error(),
+		})
+		return
+	}
+
+	w.Header().Set("Content-Type", "application/json")
+	json.NewEncoder(w).Encode(map[string]interface{}{
+		"success":  true,
+		"imported": imported,
+		"total":    total,
+		"message":  fmt.Sprintf("%d 件の利用者を登録・更新しました", imported),
+	})
+}
+
+func (s *HTTPServer) handleImportLogs(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodPost {
+		http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
+		return
+	}
+	if !s.checkPIN(r) {
+		http.Error(w, "Unauthorized PIN", http.StatusUnauthorized)
+		return
+	}
+
+	var data []byte
+	if strings.HasPrefix(r.Header.Get("Content-Type"), "multipart/form-data") {
+		file, _, err := r.FormFile("file")
+		if err != nil {
+			http.Error(w, "File not provided: "+err.Error(), http.StatusBadRequest)
+			return
+		}
+		defer file.Close()
+		data, err = io.ReadAll(file)
+		if err != nil {
+			http.Error(w, "Failed to read file: "+err.Error(), http.StatusInternalServerError)
+			return
+		}
+	} else {
+		var err error
+		data, err = io.ReadAll(r.Body)
+		if err != nil {
+			http.Error(w, "Failed to read body: "+err.Error(), http.StatusInternalServerError)
+			return
+		}
+	}
+
+	imported, total, err := s.gateService.ImportLogsCSV(data)
+	if err != nil {
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(http.StatusBadRequest)
+		json.NewEncoder(w).Encode(map[string]interface{}{
+			"success": false,
+			"error":   err.Error(),
+		})
+		return
+	}
+
+	w.Header().Set("Content-Type", "application/json")
+	json.NewEncoder(w).Encode(map[string]interface{}{
+		"success":  true,
+		"imported": imported,
+		"total":    total,
+		"message":  fmt.Sprintf("%d 件の入退室ログをインポートしました", imported),
+	})
 }
 
 func (s *HTTPServer) handleWebAdminSPA(w http.ResponseWriter, r *http.Request) {

@@ -180,3 +180,59 @@ func (a *App) ExportFiscalYearLogsCSV(fiscalYear int) (string, error) {
 
 	return savePath, nil
 }
+
+// ImportUsersCSV 利用者マスターCSVファイルの選択・インポート
+func (a *App) ImportUsersCSV() (string, error) {
+	filePath, err := runtime.OpenFileDialog(a.ctx, runtime.OpenDialogOptions{
+		Title: "利用者登録CSVファイルの選択",
+		Filters: []runtime.FileFilter{
+			{DisplayName: "CSV Files (*.csv)", Pattern: "*.csv"},
+		},
+	})
+	if err != nil {
+		return "", err
+	}
+	if filePath == "" {
+		return "", nil // キャンセル
+	}
+
+	data, err := os.ReadFile(filePath)
+	if err != nil {
+		return "", fmt.Errorf("ファイルの読み込みに失敗しました: %w", err)
+	}
+
+	imported, total, err := a.gateService.ImportUsersCSV(data)
+	if err != nil {
+		return "", fmt.Errorf("インポート中にエラーが発生しました: %w", err)
+	}
+
+	return fmt.Sprintf("利用者CSVのインポートが完了しました（%d 件登録 / 対象 %d 件）", imported, total), nil
+}
+
+// ImportLogsCSV 入退室ログCSVファイルの選択・インポート
+func (a *App) ImportLogsCSV() (string, error) {
+	filePath, err := runtime.OpenFileDialog(a.ctx, runtime.OpenDialogOptions{
+		Title: "入退室ログCSVファイルの選択",
+		Filters: []runtime.FileFilter{
+			{DisplayName: "CSV Files (*.csv)", Pattern: "*.csv"},
+		},
+	})
+	if err != nil {
+		return "", err
+	}
+	if filePath == "" {
+		return "", nil // キャンセル
+	}
+
+	data, err := os.ReadFile(filePath)
+	if err != nil {
+		return "", fmt.Errorf("ファイルの読み込みに失敗しました: %w", err)
+	}
+
+	imported, total, err := a.gateService.ImportLogsCSV(data)
+	if err != nil {
+		return "", fmt.Errorf("インポート中にエラーが発生しました: %w", err)
+	}
+
+	return fmt.Sprintf("入退室ログCSVのインポートが完了しました（%d 件インポート / 対象 %d 件）", imported, total), nil
+}

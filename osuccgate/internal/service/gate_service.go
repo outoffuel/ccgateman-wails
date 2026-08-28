@@ -8,8 +8,13 @@ import (
 	"log"
 	"osuccgate/internal/db"
 	"osuccgate/internal/nfc"
+	"strconv"
+	"strings"
 	"sync"
 	"time"
+	"unicode/utf8"
+
+	"golang.org/x/text/encoding/japanese"
 )
 
 // SwipeResponse 打刻結果レスポンス
@@ -230,4 +235,312 @@ func (s *GateService) GenerateFiscalYearCSV(year int) ([]byte, error) {
 
 	writer.Flush()
 	return buf.Bytes(), writer.Error()
+}
+
+// sanitizeCSVData BOMの削除とShift-JIS/UTF-8の正規化
+func sanitizeCSVData(data []byte) ([]byte, error) {
+	// UTF-8 BOM の除去
+	if bytes.HasPrefix(data, []byte{0xEF, 0xBB, 0xBF}) {
+		data = data[3:]
+	}
+
+	// UTF-8として有効か判定
+	if utf8.Valid(data) {
+		return data, nil
+	}
+
+	// Shift-JIS (Windows-31J/CP932) からのデコードを試みる
+	decoder := japanese.ShiftJIS.NewDecoder()
+	utf8Data, err := decoder.Bytes(data)
+	if err == nil && utf8.Valid(utf8Data) {
+		return utf8Data, nil
+	}
+
+	// フォールバック
+	return data, nil
+}
+
+// ImportUsersCSV CSVデータから利用者を一括インポート
+func (s *GateService) ImportUsersCSV(csvData []byte) (int, int, error) {
+	cleanData, err := sanitizeCSVData(csvData)
+	if err != nil {
+		return 0, 0, fmt.Errorf("CSVデータの読み込みに失敗しました: %w", err)
+	}
+
+	reader := csv.NewReader(bytes.NewReader(cleanData))
+	reader.FieldsPerRecord = -1 // 可変長対応
+	reader.TrimLeadingSpace = true
+
+	rows, err := reader.ReadAll()
+	if err != nil {
+		return 0, 0, fmt.Errorf("CSVパースエラー: %w", err)
+	}
+
+	if len(rows) == 0 {
+		return 0, 0, fmt.Errorf("CSVデータが空です")
+	}
+
+	// ヘッダー行判定
+	headerMap := make(map[string]int)
+	startIdx := 0
+
+	// 1行目をヘッダーとして調査
+	firstRow := rows[0]
+	isHeader := false
+	for colIdx, colVal := range firstRow {
+		cleaned := strings.ToLower(strings.TrimSpace(colVal))
+		cleaned = strings.ReplaceAll(cleaned, "_", "")
+		cleaned = strings.ReplaceAll(cleaned, " ", "")
+		cleaned = strings.ReplaceAll(cleaned, "（", "(")
+		cleaned = strings.ReplaceAll(cleaned, "）", ")")
+
+		if strings.Contains(cleaned, "学籍") || strings.Contains(cleaned, "学生番号") || strings.Contains(cleaned, "職員番号") || cleaned == "studentno" || cleaned == "studentid" {
+			headerMap["student_no"] = colIdx
+			isHeader = true
+		} else if strings.Contains(cleaned, "フリガナ") || strings.Contains(cleaned, "ふりがな") || strings.Contains(cleaned, "カナ") || strings.Contains(cleaned, "かな") || cleaned == "furigana" || cleaned == "kana" {
+			headerMap["furigana"] = colIdx
+			isHeader = true
+		} else if strings.Contains(cleaned, "氏名") || strings.Contains(cleaned, "名前") || strings.Contains(cleaned, "ユーザー名") || cleaned == "name" || cleaned == "username" {
+			headerMap["name"] = colIdx
+			isHeader = true
+		} else if strings.Contains(cleaned, "性別") || strings.Contains(cleaned, "性") || cleaned == "gender" || cleaned == "sex" {
+			headerMap["gender"] = colIdx
+			isHeader = true
+		} else if strings.Contains(cleaned, "区分") || strings.Contains(cleaned, "ロール") || strings.Contains(cleaned, "役職") || strings.Contains(cleaned, "属性") || cleaned == "role" || cleaned == "rolename" {
+			headerMap["role_name"] = colIdx
+			isHeader = true
+		} else if strings.Contains(cleaned, "カード") || strings.Contains(cleaned, "識別") || strings.Contains(cleaned, "idm") || strings.Contains(cleaned, "nfc") || cleaned == "cardid" {
+			headerMap["card_id"] = colIdx
+			isHeader = true
+		}
+	}
+
+	if isHeader {
+		startIdx = 1
+	}
+
+	var users []db.RegisteredUser
+	for i := startIdx; i < len(rows); i++ {
+		row := rows[i]
+		if len(row) == 0 {
+			continue
+		}
+
+		getCol := func(key string, fallbackIdx int) string {
+			if idx, ok := headerMap[key]; ok && idx < len(row) {
+				return strings.TrimSpace(row[idx])
+			}
+			if !isHeader && fallbackIdx < len(row) {
+				return strings.TrimSpace(row[fallbackIdx])
+			}
+			return ""
+		}
+
+		studentNo := getCol("student_no", 0)
+		name := getCol("name", 1)
+		furigana := getCol("furigana", 2)
+		gender := getCol("gender", 3)
+		roleStr := getCol("role_name", 4)
+		cardID := getCol("card_id", 5)
+
+		if studentNo == "" && name == "" && cardID == "" {
+			continue // 空行スキップ
+		}
+
+		// 学籍番号がないがカードIDがある場合は学籍番号にカードIDを設定
+		if studentNo == "" && cardID != "" {
+			studentNo = cardID
+		}
+
+		// カードIDが空の場合は学籍番号と同じ値を扱う
+		if cardID == "" {
+			cardID = studentNo
+		}
+
+		if studentNo == "" {
+			continue // 学籍番号/カードIDが特定できないものはスキップ
+		}
+
+		// 区分・ロールコードの解決
+		roleName := "学生"
+		roleCode := 1
+		roleTrimmed := strings.TrimSpace(roleStr)
+
+		if strings.Contains(roleTrimmed, "教職員") || strings.Contains(roleTrimmed, "教員") || strings.Contains(roleTrimmed, "職員") || roleTrimmed == "0" {
+			roleName = "教職員"
+			roleCode = 0
+		} else if strings.Contains(roleTrimmed, "スタッフ") || roleTrimmed == "9" {
+			roleName = "学生スタッフ"
+			roleCode = 9
+		} else {
+			roleName = "学生"
+			roleCode = 1
+		}
+
+		// 性別の正規化
+		genderNorm := ""
+		if strings.Contains(gender, "男") || strings.ToLower(gender) == "male" || strings.ToLower(gender) == "m" {
+			genderNorm = "男"
+		} else if strings.Contains(gender, "女") || strings.ToLower(gender) == "female" || strings.ToLower(gender) == "f" {
+			genderNorm = "女"
+		} else {
+			genderNorm = gender
+		}
+
+		users = append(users, db.RegisteredUser{
+			CardID:    cardID,
+			Name:      name,
+			Furigana:  furigana,
+			Gender:    genderNorm,
+			RoleName:  roleName,
+			RoleCode:  roleCode,
+			StudentNo: studentNo,
+		})
+	}
+
+	if len(users) == 0 {
+		return 0, len(rows) - startIdx, fmt.Errorf("インポート可能な利用者データが見つかりませんでした")
+	}
+
+	count, err := s.dbManager.ImportUsers(users)
+	return count, len(users), err
+}
+
+// ImportLogsCSV CSVデータから入退室ログを一括インポート
+func (s *GateService) ImportLogsCSV(csvData []byte) (int, int, error) {
+	cleanData, err := sanitizeCSVData(csvData)
+	if err != nil {
+		return 0, 0, fmt.Errorf("CSVデータの読み込みに失敗しました: %w", err)
+	}
+
+	reader := csv.NewReader(bytes.NewReader(cleanData))
+	reader.FieldsPerRecord = -1
+	reader.TrimLeadingSpace = true
+
+	rows, err := reader.ReadAll()
+	if err != nil {
+		return 0, 0, fmt.Errorf("CSVパースエラー: %w", err)
+	}
+
+	if len(rows) == 0 {
+		return 0, 0, fmt.Errorf("CSVデータが空です")
+	}
+
+	headerMap := make(map[string]int)
+	startIdx := 0
+
+	firstRow := rows[0]
+	isHeader := false
+	for colIdx, colVal := range firstRow {
+		cleaned := strings.ToLower(strings.TrimSpace(colVal))
+		cleaned = strings.ReplaceAll(cleaned, "_", "")
+		cleaned = strings.ReplaceAll(cleaned, " ", "")
+		cleaned = strings.ReplaceAll(cleaned, "（", "(")
+		cleaned = strings.ReplaceAll(cleaned, "）", ")")
+
+		if strings.Contains(cleaned, "日時") || strings.Contains(cleaned, "時刻") || strings.Contains(cleaned, "timestamp") || strings.Contains(cleaned, "date") || strings.Contains(cleaned, "time") {
+			headerMap["timestamp"] = colIdx
+			isHeader = true
+		} else if strings.Contains(cleaned, "識別") || strings.Contains(cleaned, "カード") || strings.Contains(cleaned, "学籍") || strings.Contains(cleaned, "学生番号") || cleaned == "cardid" || cleaned == "studentno" {
+			headerMap["card_id"] = colIdx
+			isHeader = true
+		} else if strings.Contains(cleaned, "種別") || strings.Contains(cleaned, "イベント") || strings.Contains(cleaned, "ステータス") || cleaned == "eventtype" || cleaned == "type" || cleaned == "status" {
+			headerMap["event_type"] = colIdx
+			isHeader = true
+		} else if strings.Contains(cleaned, "秒") || strings.Contains(cleaned, "duration") {
+			headerMap["duration_sec"] = colIdx
+			isHeader = true
+		}
+	}
+
+	if isHeader {
+		startIdx = 1
+	}
+
+	var logs []db.AccessLog
+	timeFormats := []string{
+		"2006-01-02 15:04:05",
+		"2006/01/02 15:04:05",
+		time.RFC3339,
+		"2006-01-02T15:04:05",
+		"2006/01/02 15:04",
+		"2006-01-02 15:04",
+	}
+
+	for i := startIdx; i < len(rows); i++ {
+		row := rows[i]
+		if len(row) == 0 {
+			continue
+		}
+
+		getCol := func(key string, fallbackIdx int) string {
+			if idx, ok := headerMap[key]; ok && idx < len(row) {
+				return strings.TrimSpace(row[idx])
+			}
+			if !isHeader && fallbackIdx < len(row) {
+				return strings.TrimSpace(row[fallbackIdx])
+			}
+			return ""
+		}
+
+		tsStr := getCol("timestamp", 1)
+		cardID := getCol("card_id", 2)
+		eventStr := getCol("event_type", 6)
+		durStr := getCol("duration_sec", 8)
+
+		if tsStr == "" && cardID == "" {
+			continue
+		}
+
+		// 日時パース
+		var parsedTime time.Time
+		for _, layout := range timeFormats {
+			if t, err := time.Parse(layout, tsStr); err == nil {
+				parsedTime = t
+				break
+			}
+		}
+		if parsedTime.IsZero() {
+			parsedTime = time.Now()
+		}
+
+		// 種別パース
+		eventType := "entry"
+		eventTrimmed := strings.TrimSpace(eventStr)
+		if strings.Contains(eventTrimmed, "強制退室") || eventTrimmed == "force_exit" {
+			eventType = "force_exit"
+		} else if strings.Contains(eventTrimmed, "退室") || strings.Contains(eventTrimmed, "退") || strings.ToLower(eventTrimmed) == "exit" || strings.ToLower(eventTrimmed) == "out" {
+			eventType = "exit"
+		} else {
+			eventType = "entry"
+		}
+
+		var durSec int64 = 0
+		if durStr != "" {
+			if n, err := strconv.ParseInt(durStr, 10, 64); err == nil {
+				durSec = n
+			}
+		}
+
+		// cardID のユーザー解決（学籍番号またはカードIDから既存カードIDを探す）
+		if cardID != "" {
+			if u, _ := s.dbManager.GetUser(cardID); u != nil {
+				cardID = u.CardID
+			}
+		}
+
+		logs = append(logs, db.AccessLog{
+			CardID:         cardID,
+			EventType:      eventType,
+			Timestamp:      parsedTime,
+			DurationSecond: durSec,
+		})
+	}
+
+	if len(logs) == 0 {
+		return 0, len(rows) - startIdx, fmt.Errorf("インポート可能なログデータが見つかりませんでした")
+	}
+
+	count, err := s.dbManager.ImportLogs(logs)
+	return count, len(logs), err
 }

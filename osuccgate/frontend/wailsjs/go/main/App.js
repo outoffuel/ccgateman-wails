@@ -45,3 +45,11 @@ export function ForceExitAllInside() {
 export function ExportFiscalYearLogsCSV(arg1) {
   return window['go']['main']['App']['ExportFiscalYearLogsCSV'](arg1);
 }
+
+export function ImportUsersCSV() {
+  return window['go']['main']['App']['ImportUsersCSV']();
+}
+
+export function ImportLogsCSV() {
+  return window['go']['main']['App']['ImportLogsCSV']();
+}

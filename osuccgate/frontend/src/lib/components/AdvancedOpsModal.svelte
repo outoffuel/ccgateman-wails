@@ -1,5 +1,12 @@
 <script>
-  import { DeleteUser, ClearAllLogs, ForceExitAllInside, ExportFiscalYearLogsCSV } from '../../../wailsjs/go/main/App.js';
+  import { 
+    DeleteUser, 
+    ClearAllLogs, 
+    ForceExitAllInside, 
+    ExportFiscalYearLogsCSV,
+    ImportUsersCSV,
+    ImportLogsCSV
+  } from '../../../wailsjs/go/main/App.js';
 
   export let onClose = () => {};
   export let onRefresh = () => {};
@@ -12,6 +19,40 @@
 
   function handleConfirm() {
     isConfirmed = true;
+  }
+
+  async function handleImportUsers() {
+    statusMessage = '利用者CSVを読み込み中...';
+    isError = false;
+    try {
+      const msg = await ImportUsersCSV();
+      if (msg) {
+        statusMessage = msg;
+        onRefresh();
+      } else {
+        statusMessage = '利用者CSVのインポートがキャンセルされました';
+      }
+    } catch (err) {
+      isError = true;
+      statusMessage = '利用者CSVのインポートに失敗しました: ' + err;
+    }
+  }
+
+  async function handleImportLogs() {
+    statusMessage = '入退室ログCSVを読み込み中...';
+    isError = false;
+    try {
+      const msg = await ImportLogsCSV();
+      if (msg) {
+        statusMessage = msg;
+        onRefresh();
+      } else {
+        statusMessage = '入退室ログCSVのインポートがキャンセルされました';
+      }
+    } catch (err) {
+      isError = true;
+      statusMessage = '入退室ログCSVのインポートに失敗しました: ' + err;
+    }
   }
 
   async function handleExportCSV() {
@@ -49,18 +90,18 @@
     const id = deleteCardId.trim();
     if (!id) {
       isError = true;
-      statusMessage = '削除するカードIDを入力してください';
+      statusMessage = '削除するカードIDまたは学籍番号を入力してください';
       return;
     }
 
-    if (!confirm(`本当にカードID: ${id} の利用者を削除しますか？\n（関連する打刻ログも削除されます）`)) {
+    if (!confirm(`本当にID: ${id} の利用者を削除しますか？\n（関連する打刻ログも削除されます）`)) {
       return;
     }
 
     try {
       await DeleteUser(id);
       deleteCardId = '';
-      statusMessage = `カードID: ${id} を削除しました`;
+      statusMessage = `ID: ${id} を削除しました`;
       onRefresh();
     } catch (err) {
       isError = true;
@@ -133,7 +174,55 @@
           </div>
         {/if}
 
-        <!-- 1. 年度別入退室ログ出力 -->
+        <!-- 1. CSVインポート (旧システムからのデータ移行) -->
+        <div class="p-4 bg-slate-800/60 rounded-2xl border border-slate-700/60 space-y-3">
+          <div class="font-bold text-blue-400 text-sm flex items-center gap-2">
+            <span>📥</span> CSVデータインポート (旧システム移行)
+          </div>
+          <p class="text-xs text-slate-400">
+            旧システム等で管理していた利用者マスターや入退室ログのCSVファイルを一括取り込みします。
+          </p>
+          
+          <div class="grid grid-cols-1 sm:grid-cols-2 gap-3 pt-1">
+            <!-- 利用者CSVインポート -->
+            <div class="bg-slate-900/80 p-3 rounded-xl border border-slate-800 flex flex-col justify-between gap-2">
+              <div>
+                <div class="text-xs font-bold text-white flex items-center gap-1.5">
+                  <span>👥</span> 利用者登録マスター CSV
+                </div>
+                <p class="text-[11px] text-slate-400 mt-1">
+                  学籍番号、氏名、フリガナ、性別、区分、カードIDを取り込みます。
+                </p>
+              </div>
+              <button 
+                on:click={handleImportUsers}
+                class="w-full bg-blue-600 hover:bg-blue-500 text-white text-xs font-bold py-2 px-3 rounded-lg transition shadow-sm"
+              >
+                利用者CSVをインポート
+              </button>
+            </div>
+
+            <!-- ログCSVインポート -->
+            <div class="bg-slate-900/80 p-3 rounded-xl border border-slate-800 flex flex-col justify-between gap-2">
+              <div>
+                <div class="text-xs font-bold text-white flex items-center gap-1.5">
+                  <span>📋</span> 入退室ログ CSV
+                </div>
+                <p class="text-[11px] text-slate-400 mt-1">
+                  過去の入退室打刻日時、種別（入室/退室/強制退室）等の履歴を取り込みます。
+                </p>
+              </div>
+              <button 
+                on:click={handleImportLogs}
+                class="w-full bg-indigo-600 hover:bg-indigo-500 text-white text-xs font-bold py-2 px-3 rounded-lg transition shadow-sm"
+              >
+                ログCSVをインポート
+              </button>
+            </div>
+          </div>
+        </div>
+
+        <!-- 2. 年度別入退室ログ出力 -->
         <div class="p-4 bg-slate-800/60 rounded-2xl border border-slate-700/60">
           <div class="font-bold text-white text-sm mb-1 flex items-center gap-2">
             <span>📊</span> yyyy年度 入退室ログ出力 (CSV)
@@ -158,7 +247,7 @@
           </div>
         </div>
 
-        <!-- 2. 手動一斉強制退室 -->
+        <!-- 3. 手動一斉強制退室 -->
         <div class="p-4 bg-slate-800/60 rounded-2xl border border-slate-700/60">
           <div class="font-bold text-amber-300 text-sm mb-1 flex items-center gap-2">
             <span>🚪</span> 在室者の一括強制退室 (手動実行)
