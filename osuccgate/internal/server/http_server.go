@@ -39,7 +39,6 @@ func NewHTTPServer(dbMgr *db.DBManager, gateSvc *service.GateService, port int, 
 func (s *HTTPServer) Start() {
 	mux := http.NewServeMux()
 
-	// CORSミドルウェア対応ハンドラー
 	handleWithCORS := func(pattern string, handler http.HandlerFunc) {
 		mux.HandleFunc(pattern, func(w http.ResponseWriter, r *http.Request) {
 			w.Header().Set("Access-Control-Allow-Origin", "*")
@@ -60,9 +59,10 @@ func (s *HTTPServer) Start() {
 	handleWithCORS("/api/users/", s.handleUserByID)
 	handleWithCORS("/api/logs", s.handleLogs)
 	handleWithCORS("/api/inside", s.handleInsideUsers)
+	handleWithCORS("/api/force-exit", s.handleForceExit)
 	handleWithCORS("/api/export/csv", s.handleExportCSV)
 
-	// Web管理者画面のシングルファイル配信
+	// Web管理者画面 SPA
 	mux.HandleFunc("/", s.handleWebAdminSPA)
 
 	s.server = &http.Server{
@@ -198,7 +198,6 @@ func (s *HTTPServer) handleLogs(w http.ResponseWriter, r *http.Request) {
 		json.NewEncoder(w).Encode(logs)
 
 	case http.MethodDelete:
-		// 高度な操作: ログ一括削除
 		if !s.checkPIN(r) {
 			http.Error(w, "Unauthorized PIN", http.StatusUnauthorized)
 			return
@@ -225,6 +224,27 @@ func (s *HTTPServer) handleInsideUsers(w http.ResponseWriter, r *http.Request) {
 	json.NewEncoder(w).Encode(users)
 }
 
+func (s *HTTPServer) handleForceExit(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodPost {
+		http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
+		return
+	}
+	if !s.checkPIN(r) {
+		http.Error(w, "Unauthorized PIN", http.StatusUnauthorized)
+		return
+	}
+	count, err := s.gateService.ForceExitAllInside()
+	if err != nil {
+		http.Error(w, err.Error(), http.StatusInternalServerError)
+		return
+	}
+	w.Header().Set("Content-Type", "application/json")
+	json.NewEncoder(w).Encode(map[string]interface{}{
+		"success": true,
+		"count":   count,
+	})
+}
+
 func (s *HTTPServer) handleExportCSV(w http.ResponseWriter, r *http.Request) {
 	yearStr := r.URL.Query().Get("year")
 	year, err := strconv.Atoi(yearStr)
@@ -246,7 +266,6 @@ func (s *HTTPServer) handleExportCSV(w http.ResponseWriter, r *http.Request) {
 }
 
 func (s *HTTPServer) handleWebAdminSPA(w http.ResponseWriter, r *http.Request) {
-	// ブラウザで直接 http://<IP>:8080 を開いたときのWeb管理者画面
 	html := `<!DOCTYPE html>
 <html lang="ja">
 <head>
@@ -262,14 +281,13 @@ body { font-family: 'Noto Sans JP', 'Inter', sans-serif; background-color: #0f17
 <body class="min-h-screen">
   <div id="app"></div>
   <script>
-    // 管理者SPAスクリプト (LAN内ブラウザ用)
     const API_BASE = window.location.origin;
     let currentPIN = sessionStorage.getItem("admin_pin") || "";
     let stats = { currentInsideCount: 0, totalUserCount: 0, todayLogCount: 0 };
     let logs = [];
     let users = [];
     let insideUsers = [];
-    let activeTab = 'logs'; // 'logs', 'users', 'inside'
+    let activeTab = 'logs';
 
     async function checkAuth() {
       if (!currentPIN) {
@@ -300,7 +318,7 @@ body { font-family: 'Noto Sans JP', 'Inter', sans-serif; background-color: #0f17
             <div class="w-16 h-16 bg-blue-600/20 text-blue-400 rounded-full flex items-center justify-center mx-auto mb-4 text-2xl font-bold">🔒</div>
             <h2 class="text-2xl font-bold text-white mb-2">管理者認証</h2>
             <p class="text-slate-400 text-sm mb-6">4桁の管理者PINコードを入力してください</p>
-            <input type="password" id="pinInput" maxlength="8" class="w-full text-center text-3xl tracking-widest bg-slate-800 border border-slate-700 text-white rounded-xl py-3 px-4 focus:outline-none focus:border-blue-500 mb-6" placeholder="••••" autofocus>
+            <input type="password" id="pinInput" maxlength="8" class="w-full text-center text-3xl tracking-widest bg-slate-800 border border-slate-700 text-white rounded-xl py-3 px-4 focus:outline-none focus:border-blue-500 mb-6 font-mono" placeholder="••••" autofocus>
             <button onclick="submitPin()" class="w-full bg-blue-600 hover:bg-blue-500 text-white font-bold py-3 px-4 rounded-xl transition">ログイン</button>
           </div>
         </div>
@@ -360,7 +378,6 @@ body { font-family: 'Noto Sans JP', 'Inter', sans-serif; background-color: #0f17
         </header>
 
         <main class="max-w-7xl mx-auto p-6 space-y-6">
-          <!-- 統計カード -->
           <div class="grid grid-cols-1 md:grid-cols-3 gap-6">
             <div class="bg-slate-900/80 border border-slate-800 rounded-2xl p-6 shadow-lg">
               <div class="text-slate-400 text-sm font-medium mb-1">現在の在室者数</div>
@@ -382,7 +399,6 @@ body { font-family: 'Noto Sans JP', 'Inter', sans-serif; background-color: #0f17
             </div>
           </div>
 
-          <!-- タブナビゲーション -->
           <div class="flex items-center justify-between border-b border-slate-800 pb-3">
             <div class="flex gap-2">
               <button onclick="setTab('logs')" id="tab-logs" class="px-4 py-2 rounded-lg font-medium text-sm transition bg-blue-600 text-white">入退室ログ</button>
@@ -392,7 +408,6 @@ body { font-family: 'Noto Sans JP', 'Inter', sans-serif; background-color: #0f17
             <div id="tabActions"></div>
           </div>
 
-          <!-- タブコンテンツ -->
           <div id="tabContent" class="bg-slate-900/80 border border-slate-800 rounded-2xl p-6 shadow-lg overflow-x-auto">
           </div>
         </main>
@@ -439,24 +454,33 @@ body { font-family: 'Noto Sans JP', 'Inter', sans-serif; background-color: #0f17
                 <th class="p-3">区分</th>
                 <th class="p-3">学籍/職員番号</th>
                 <th class="p-3">種別</th>
+                <th class="p-3">入力方法</th>
                 <th class="p-3">滞在時間</th>
               </tr>
             </thead>
             <tbody class="divide-y divide-slate-800">
-              ${logs.map(l => ` + "`" + `
-                <tr class="hover:bg-slate-800/30">
-                  <td class="p-3 font-mono text-slate-400">${new Date(l.timestamp).toLocaleString('ja-JP')}</td>
-                  <td class="p-3 font-bold text-white">${l.userName || '未登録'}</td>
-                  <td class="p-3"><span class="px-2 py-0.5 rounded text-xs ${l.roleCode === 9 ? 'bg-purple-900/50 text-purple-300 border border-purple-700/50' : 'bg-slate-800 text-slate-300'}">${l.roleName || '-'}</span></td>
-                  <td class="p-3 font-mono">${l.studentNo || '-'}</td>
-                  <td class="p-3">
-                    <span class="px-2 py-1 rounded-md text-xs font-bold ${l.eventType === 'entry' ? 'bg-blue-600/30 text-blue-400 border border-blue-500/30' : 'bg-amber-600/30 text-amber-400 border border-amber-500/30'}">
-                      ${l.eventType === 'entry' ? '🔵 入室' : '🟠 退室'}
-                    </span>
-                  </td>
-                  <td class="p-3 text-slate-400">${l.durationText || '-'}</td>
-                </tr>
-              ` + "`" + `).join('')}
+              ${logs.map(l => {
+                let badge = '<span class="px-2 py-1 rounded-md text-xs font-bold bg-blue-600/30 text-blue-400 border border-blue-500/30">🔵 入室</span>';
+                let method = '<span class="text-xs text-slate-400">カード</span>';
+                if (l.eventType === 'exit') {
+                  badge = '<span class="px-2 py-1 rounded-md text-xs font-bold bg-amber-600/30 text-amber-400 border border-amber-500/30">🟠 退室</span>';
+                  method = '<span class="text-xs text-slate-400">カード</span>';
+                } else if (l.eventType === 'force_exit') {
+                  badge = '<span class="px-2 py-1 rounded-md text-xs font-bold bg-rose-600/30 text-rose-400 border border-rose-500/30">⚠️ 強制退室</span>';
+                  method = '<span class="text-xs text-rose-300 font-semibold">システム自動 (23:00)</span>';
+                }
+                return ` + "`" + `
+                  <tr class="hover:bg-slate-800/30">
+                    <td class="p-3 font-mono text-slate-400">${new Date(l.timestamp).toLocaleString('ja-JP')}</td>
+                    <td class="p-3 font-bold text-white">${l.userName || '未登録'}</td>
+                    <td class="p-3"><span class="px-2 py-0.5 rounded text-xs ${l.roleCode === 0 ? 'bg-purple-900/50 text-purple-300 border border-purple-700/50' : (l.roleCode === 9 ? 'bg-emerald-900/50 text-emerald-300 border border-emerald-700/50' : 'bg-slate-800 text-slate-300')}">${l.roleName || '-'}</span></td>
+                    <td class="p-3 font-mono">${l.studentNo || '-'}</td>
+                    <td class="p-3">${badge}</td>
+                    <td class="p-3">${method}</td>
+                    <td class="p-3 text-slate-400">${l.durationText || '-'}</td>
+                  </tr>
+                ` + "`" + `;
+              }).join('')}
             </tbody>
           </table>
         ` + "`" + `;
@@ -502,7 +526,7 @@ body { font-family: 'Noto Sans JP', 'Inter', sans-serif; background-color: #0f17
               <tr>
                 <th class="p-3">識別ID (磁気/NFC)</th>
                 <th class="p-3">氏名</th>
-                <th class="p-3">区分</th>
+                <th class="p-3">区分 (コード)</th>
                 <th class="p-3">学籍/職員番号</th>
                 <th class="p-3 text-right">操作</th>
               </tr>
@@ -512,7 +536,7 @@ body { font-family: 'Noto Sans JP', 'Inter', sans-serif; background-color: #0f17
                 <tr class="hover:bg-slate-800/30">
                   <td class="p-3 font-mono text-xs text-slate-400">${u.cardId}</td>
                   <td class="p-3 font-bold text-white">${u.name}</td>
-                  <td class="p-3"><span class="px-2 py-0.5 rounded text-xs ${u.roleCode === 9 ? 'bg-purple-900/50 text-purple-300' : 'bg-slate-800 text-slate-300'}">${u.roleName} (${u.roleCode})</span></td>
+                  <td class="p-3"><span class="px-2 py-0.5 rounded text-xs ${u.roleCode === 0 ? 'bg-purple-900/50 text-purple-300' : (u.roleCode === 9 ? 'bg-emerald-900/50 text-emerald-300' : 'bg-slate-800 text-slate-300')}">${u.roleName} (${u.roleCode})</span></td>
                   <td class="p-3 font-mono">${u.studentNo || '-'}</td>
                   <td class="p-3 text-right space-x-2">
                     <button onclick='editUser(${JSON.stringify(u)})' class="text-blue-400 hover:underline">編集</button>
@@ -544,15 +568,14 @@ body { font-family: 'Noto Sans JP', 'Inter', sans-serif; background-color: #0f17
                 <div>
                   <label class="block text-xs font-semibold text-slate-400 uppercase mb-1">区分名</label>
                   <select id="formRoleName" class="w-full bg-slate-800 border border-slate-700 text-white rounded-xl px-3 py-2" onchange="onRoleChange()">
-                    <option value="学生" ${user && user.roleName === '学生' ? 'selected' : ''}>学生</option>
                     <option value="教職員" ${user && user.roleName === '教職員' ? 'selected' : ''}>教職員</option>
-                    <option value="スタッフ" ${user && user.roleName === 'スタッフ' ? 'selected' : ''}>スタッフ</option>
-                    <option value="来客" ${user && user.roleName === '来客' ? 'selected' : ''}>来客</option>
+                    <option value="学生" ${(!user || user.roleName === '学生') ? 'selected' : ''}>学生</option>
+                    <option value="学生スタッフ" ${user && user.roleName === '学生スタッフ' ? 'selected' : ''}>学生スタッフ</option>
                   </select>
                 </div>
                 <div>
                   <label class="block text-xs font-semibold text-slate-400 uppercase mb-1">ロールコード</label>
-                  <input type="number" id="formRoleCode" value="${user ? user.roleCode : 1}" class="w-full bg-slate-800 border border-slate-700 text-white rounded-xl px-3 py-2">
+                  <input type="number" id="formRoleCode" value="${user ? user.roleCode : 1}" readonly class="w-full bg-slate-800/50 border border-slate-700 text-slate-400 rounded-xl px-3 py-2 font-mono">
                 </div>
               </div>
               <div>
@@ -572,8 +595,9 @@ body { font-family: 'Noto Sans JP', 'Inter', sans-serif; background-color: #0f17
     function onRoleChange() {
       const role = document.getElementById("formRoleName").value;
       const codeInput = document.getElementById("formRoleCode");
-      if (role === '教職員') codeInput.value = 9;
-      else if (role === 'スタッフ') codeInput.value = 5;
+      if (role === '教職員') codeInput.value = 0;
+      else if (role === '学生') codeInput.value = 1;
+      else if (role === '学生スタッフ') codeInput.value = 9;
       else codeInput.value = 1;
     }
 
@@ -587,7 +611,7 @@ body { font-family: 'Noto Sans JP', 'Inter', sans-serif; background-color: #0f17
         cardId: document.getElementById("formCardId").value.trim(),
         name: document.getElementById("formName").value.trim(),
         roleName: document.getElementById("formRoleName").value,
-        roleCode: parseInt(document.getElementById("formRoleCode").value, 10) || 1,
+        roleCode: parseInt(document.getElementById("formRoleCode").value, 10),
         studentNo: document.getElementById("formStudentNo").value.trim()
       };
       const res = await fetch(API_BASE + '/api/users', {
@@ -628,6 +652,12 @@ body { font-family: 'Noto Sans JP', 'Inter', sans-serif; background-color: #0f17
               </div>
 
               <div class="p-4 bg-slate-800/50 rounded-xl border border-slate-700/50">
+                <div class="font-bold text-amber-400 text-sm mb-1">🚪 即時一斉強制退室 (手動実行)</div>
+                <p class="text-xs text-slate-400 mb-3">現在在室中のすべてのユーザーを即座に「強制退室」として記録します。</p>
+                <button onclick="forceExitAction()" class="bg-amber-700 hover:bg-amber-600 text-white text-sm font-bold px-4 py-2 rounded-lg transition w-full">在室者の一括強制退室を実行</button>
+              </div>
+
+              <div class="p-4 bg-slate-800/50 rounded-xl border border-slate-700/50">
                 <div class="font-bold text-rose-400 text-sm mb-1">🗑️ 登録者の個別削除</div>
                 <p class="text-xs text-slate-400 mb-2">削除する利用者のカードIDを入力してください。</p>
                 <div class="flex gap-2">
@@ -653,6 +683,22 @@ body { font-family: 'Noto Sans JP', 'Inter', sans-serif; background-color: #0f17
     function downloadCSV() {
       const year = document.getElementById("exportYear").value || 2026;
       window.open(API_BASE + '/api/export/csv?year=' + year + '&pin=' + encodeURIComponent(currentPIN), '_blank');
+    }
+
+    async function forceExitAction() {
+      if (!confirm("現在在室中のすべてのユーザーを強制退室させますか？")) return;
+      const res = await fetch(API_BASE + '/api/force-exit', {
+        method: 'POST',
+        headers: { 'X-Admin-PIN': currentPIN }
+      });
+      if (res.ok) {
+        const data = await res.json();
+        alert(data.count + " 名のユーザーを強制退室処理しました");
+        closeModal();
+        loadAllData();
+      } else {
+        alert("強制退室に失敗しました");
+      }
     }
 
     async function deleteUserAction() {
@@ -697,7 +743,6 @@ body { font-family: 'Noto Sans JP', 'Inter', sans-serif; background-color: #0f17
       checkAuth();
     }
 
-    // 定期リフレッシュ (10秒ごと)
     setInterval(() => {
       if (currentPIN) loadAllData();
     }, 10000);

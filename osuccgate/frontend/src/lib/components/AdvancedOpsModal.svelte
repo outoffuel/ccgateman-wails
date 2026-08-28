@@ -1,5 +1,5 @@
 <script>
-  import { DeleteUser, ClearAllLogs, ExportFiscalYearLogsCSV } from '../../../wailsjs/go/main/App.js';
+  import { DeleteUser, ClearAllLogs, ForceExitAllInside, ExportFiscalYearLogsCSV } from '../../../wailsjs/go/main/App.js';
 
   export let onClose = () => {};
   export let onRefresh = () => {};
@@ -27,6 +27,21 @@
     } catch (err) {
       isError = true;
       statusMessage = 'CSV出力に失敗しました: ' + err;
+    }
+  }
+
+  async function handleForceExitAll() {
+    if (!confirm('現在在室中のすべての利用者を強制退室処理しますか？\n（ログには「強制退室」として記録されます）')) {
+      return;
+    }
+
+    try {
+      const count = await ForceExitAllInside();
+      statusMessage = `${count} 名の利用者を強制退室処理しました`;
+      onRefresh();
+    } catch (err) {
+      isError = true;
+      statusMessage = '強制退室処理に失敗しました: ' + err;
     }
   }
 
@@ -88,7 +103,7 @@
           【重要】システムの管理者及びリーダーに了承を得て操作を行ってください。
         </p>
         <p class="text-rose-300/80 text-xs leading-relaxed">
-          このメニューでは登録データの削除、ログの完全消去、および年度別アーカイブの書き出しを実行できます。誤った操作によるデータ消失にご注意ください。
+          このメニューでは登録データの削除、ログの完全消去、手動一斉強制退室、および年度別アーカイブの書き出しを実行できます。誤った操作によるデータ消失にご注意ください。
         </p>
       </div>
 
@@ -111,7 +126,7 @@
 
     {:else}
       <!-- 操作パネル -->
-      <div class="space-y-4 mb-6 text-left">
+      <div class="space-y-4 mb-6 text-left max-h-[70vh] overflow-y-auto pr-1">
         {#if statusMessage}
           <div class={`p-3 rounded-xl text-xs font-mono whitespace-pre-line ${isError ? 'bg-rose-950/80 border border-rose-800 text-rose-300' : 'bg-emerald-950/80 border border-emerald-800 text-emerald-300'}`}>
             {statusMessage}
@@ -143,7 +158,23 @@
           </div>
         </div>
 
-        <!-- 2. 登録者の削除 -->
+        <!-- 2. 手動一斉強制退室 -->
+        <div class="p-4 bg-slate-800/60 rounded-2xl border border-slate-700/60">
+          <div class="font-bold text-amber-300 text-sm mb-1 flex items-center gap-2">
+            <span>🚪</span> 在室者の一括強制退室 (手動実行)
+          </div>
+          <p class="text-xs text-slate-400 mb-3">
+            現在在室中のすべての利用者を即座に強制退室させます（毎日23:00に自動実行される処理の手動トリガーです）。
+          </p>
+          <button 
+            on:click={handleForceExitAll}
+            class="w-full bg-amber-700 hover:bg-amber-600 text-white text-sm font-bold py-2.5 px-4 rounded-xl transition shadow-sm"
+          >
+            在室中メンバーを一括強制退室
+          </button>
+        </div>
+
+        <!-- 3. 登録者の削除 -->
         <div class="p-4 bg-slate-800/60 rounded-2xl border border-slate-700/60">
           <div class="font-bold text-rose-300 text-sm mb-1 flex items-center gap-2">
             <span>🗑️</span> 登録利用者の削除
@@ -167,7 +198,7 @@
           </div>
         </div>
 
-        <!-- 3. 入退室ログ全削除 -->
+        <!-- 4. 入退室ログ全削除 -->
         <div class="p-4 bg-slate-800/60 rounded-2xl border border-slate-700/60">
           <div class="font-bold text-rose-400 text-sm mb-1 flex items-center gap-2">
             <span>💣</span> 全入退室ログの完全初期化

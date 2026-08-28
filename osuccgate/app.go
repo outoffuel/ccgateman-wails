@@ -50,8 +50,9 @@ func (a *App) startup(ctx context.Context) {
 	}
 	a.dbManager = dbMgr
 
-	// ゲートサービス初期化
+	// ゲートサービス初期化 & 23:00強制退室スケジューラ開始
 	a.gateService = service.NewGateService(dbMgr)
+	a.gateService.StartScheduler()
 
 	// NFC PaSoRi リーダーの監視開始
 	a.nfcReader = nfc.NewNFCReader(func(cardID string) {
@@ -80,6 +81,9 @@ func (a *App) beforeClose(ctx context.Context) (prevent bool) {
 
 // shutdown is called at application termination
 func (a *App) shutdown(ctx context.Context) {
+	if a.gateService != nil {
+		a.gateService.StopScheduler()
+	}
 	if a.nfcReader != nil {
 		a.nfcReader.Stop()
 	}
@@ -141,6 +145,11 @@ func (a *App) GetCurrentInsideUsers() ([]db.UserStatus, error) {
 // ClearAllLogs 全入退室ログの削除（高度な操作）
 func (a *App) ClearAllLogs() error {
 	return a.dbManager.ClearAllLogs()
+}
+
+// ForceExitAllInside 在室中の全利用者を即時一括強制退室（高度な操作）
+func (a *App) ForceExitAllInside() (int, error) {
+	return a.gateService.ForceExitAllInside()
 }
 
 // ExportFiscalYearLogsCSV 指定年度のCSVデータを生成して保存ダイアログを表示

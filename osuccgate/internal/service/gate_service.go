@@ -2,8 +2,10 @@ package service
 
 import (
 	"bytes"
+	"context"
 	"encoding/csv"
 	"fmt"
+	"log"
 	"osuccgate/internal/db"
 	"osuccgate/internal/nfc"
 	"sync"
@@ -17,11 +19,11 @@ type SwipeResponse struct {
 	CardID       string `json:"cardId"`
 	UserName     string `json:"userName"`
 	RoleName     string `json:"roleName"`
-	RoleCode     int    `json:"roleCode"`
+	RoleCode     int    `json:"roleCode"` // 0: 教職員, 1: 学生, 9: 学生スタッフ
 	StudentNo    string `json:"studentNo"`
-	EventType    string `json:"eventType"`    // "entry" or "exit"
+	EventType    string `json:"eventType"`    // "entry", "exit", "force_exit"
 	Timestamp    string `json:"timestamp"`    // "15:04:05"
-	DurationText string `json:"durationText"` // "1時間30分" (退室時のみ)
+	DurationText string `json:"durationText"` // "1時間30分" (退室・強制退室時)
 	SoundType    string `json:"soundType"`    // "studentEntry", "studentExit", "staffEntry", "staffExit", "booboo"
 	IsDebounced  bool   `json:"isDebounced"`  // デバウンスによるスキップ
 }
@@ -31,6 +33,9 @@ type GateService struct {
 	lastSwipes  map[string]time.Time
 	mu          sync.Mutex
 	debounceSec time.Duration
+
+	schedulerCancel context.CancelFunc
+	lastForceExitDay string // 23:00二重実行防止用 ("2026-08-28")
 }
 
 func NewGateService(dbMgr *db.DBManager) *GateService {
@@ -39,6 +44,52 @@ func NewGateService(dbMgr *db.DBManager) *GateService {
 		lastSwipes:  make(map[string]time.Time),
 		debounceSec: 2 * time.Second, // 要件: 2秒間の待機（受付不可）時間
 	}
+}
+
+// StartScheduler 23:00強制退室スケジューラーの開始
+func (s *GateService) StartScheduler() {
+	ctx, cancel := context.WithCancel(context.Background())
+	s.schedulerCancel = cancel
+
+	go func() {
+		ticker := time.NewTicker(30 * time.Second)
+		defer ticker.Stop()
+
+		for {
+			select {
+			case <-ctx.Done():
+				return
+			case now := <-ticker.C:
+				// 毎日 23:00 (23時00分〜23時01分の間) にチェック
+				todayStr := now.Format("2006-01-02")
+				if now.Hour() == 23 && now.Minute() == 0 {
+					if s.lastForceExitDay != todayStr {
+						s.lastForceExitDay = todayStr
+						log.Printf("[Scheduler] 23:00 reached. Executing automatic force exit for all inside users...")
+						count, err := s.dbManager.ForceExitAllInsideUsers(now)
+						if err != nil {
+							log.Printf("[Scheduler] Error during automatic force exit: %v", err)
+						} else {
+							log.Printf("[Scheduler] Automatic force exit completed. Processed %d users.", count)
+						}
+					}
+				}
+			}
+		}
+	}()
+}
+
+// StopScheduler スケジューラーの停止
+func (s *GateService) StopScheduler() {
+	if s.schedulerCancel != nil {
+		s.schedulerCancel()
+	}
+}
+
+// ForceExitAllInside 手動での一括強制退室処理
+func (s *GateService) ForceExitAllInside() (int, error) {
+	now := time.Now()
+	return s.dbManager.ForceExitAllInsideUsers(now)
 }
 
 // ProcessSwipe 打刻受付メインロジック (磁気 / NFC 共通)
@@ -99,15 +150,16 @@ func (s *GateService) ProcessSwipe(rawCardID string) *SwipeResponse {
 		}
 	}
 
-	// 音声演出タイプの決定 (ロール・入退室に応じて)
+	// 音声演出タイプの決定 (教職員: 0, 学生: 1, 学生スタッフ: 9)
 	soundType := "studentEntry"
-	if user.RoleCode == 9 || user.RoleName == "教職員" || user.RoleName == "スタッフ" {
+	if user.RoleCode == 0 || user.RoleName == "教職員" {
 		if logRecord.EventType == "entry" {
 			soundType = "staffEntry"
 		} else {
 			soundType = "staffExit"
 		}
 	} else {
+		// 学生 (1) または 学生スタッフ (9)
 		if logRecord.EventType == "entry" {
 			soundType = "studentEntry"
 		} else {
@@ -141,17 +193,24 @@ func (s *GateService) GenerateFiscalYearCSV(year int) ([]byte, error) {
 	buf.Write([]byte{0xEF, 0xBB, 0xBF})
 
 	writer := csv.NewWriter(&buf)
-	// ヘッダー行
-	headers := []string{"ログID", "打刻日時", "識別ID", "学籍番号/職員番号", "氏名", "区分", "入退室", "滞在時間(秒)", "滞在時間"}
+	// ヘッダー行 (入力種別・方法を明記)
+	headers := []string{"ログID", "打刻日時", "識別ID", "学籍番号/職員番号", "氏名", "区分", "入退室種別", "入力方法", "滞在時間(秒)", "滞在時間"}
 	if err := writer.Write(headers); err != nil {
 		return nil, err
 	}
 
 	for _, l := range logs {
 		eventTypeJa := "入室"
+		inputMethod := "カード読み取り"
+
 		if l.EventType == "exit" {
 			eventTypeJa = "退室"
+			inputMethod = "カード読み取り"
+		} else if l.EventType == "force_exit" {
+			eventTypeJa = "強制退室"
+			inputMethod = "システム自動 (23:00強制退室)"
 		}
+
 		row := []string{
 			fmt.Sprintf("%d", l.ID),
 			l.Timestamp.Format("2006-01-02 15:04:05"),
@@ -160,6 +219,7 @@ func (s *GateService) GenerateFiscalYearCSV(year int) ([]byte, error) {
 			l.UserName,
 			l.RoleName,
 			eventTypeJa,
+			inputMethod,
 			fmt.Sprintf("%d", l.DurationSecond),
 			l.DurationText,
 		}

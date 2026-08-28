@@ -15,8 +15,8 @@ import (
 type RegisteredUser struct {
 	CardID    string    `json:"cardId"`    // 磁気カード番号 / NFC IDm
 	Name      string    `json:"name"`      // 氏名
-	RoleName  string    `json:"roleName"`  // 学生, 教職員, スタッフ 等
-	RoleCode  int       `json:"roleCode"`  // 1: 学生, 9: 教職員, etc.
+	RoleName  string    `json:"roleName"`  // 教職員, 学生, 学生スタッフ 等
+	RoleCode  int       `json:"roleCode"`  // 0: 教職員, 1: 学生, 9: 学生スタッフ
 	StudentNo string    `json:"studentNo"` // 学籍番号/職員番号 (任意)
 	CreatedAt time.Time `json:"createdAt"`
 	UpdatedAt time.Time `json:"updatedAt"`
@@ -24,27 +24,27 @@ type RegisteredUser struct {
 
 // AccessLog 入退室ログ
 type AccessLog struct {
-	ID             int64      `json:"id"`
-	CardID         string     `json:"cardId"`
-	UserName       string     `json:"userName"`
-	RoleName       string     `json:"roleName"`
-	RoleCode       int        `json:"roleCode"`
-	StudentNo      string     `json:"studentNo"`
-	EventType      string     `json:"eventType"` // "entry" (入室) or "exit" (退室)
-	Timestamp      time.Time  `json:"timestamp"`
-	DurationSecond int64      `json:"durationSecond"` // 退室時に算出 (秒単位)
-	DurationText   string     `json:"durationText"`   // "1時間23分" 等
+	ID             int64     `json:"id"`
+	CardID         string    `json:"cardId"`
+	UserName       string    `json:"userName"`
+	RoleName       string    `json:"roleName"`
+	RoleCode       int       `json:"roleCode"`
+	StudentNo      string    `json:"studentNo"`
+	EventType      string    `json:"eventType"` // "entry" (入室), "exit" (退室), "force_exit" (強制退室)
+	Timestamp      time.Time `json:"timestamp"`
+	DurationSecond int64     `json:"durationSecond"` // 退室・強制退室時に算出 (秒単位)
+	DurationText   string    `json:"durationText"`   // "1時間23分" 等
 }
 
 // UserStatus 在室状態・最新ログ
 type UserStatus struct {
-	CardID         string    `json:"cardId"`
-	UserName       string    `json:"userName"`
-	RoleName       string    `json:"roleName"`
-	StudentNo      string    `json:"studentNo"`
-	CurrentStatus  string    `json:"currentStatus"` // "inside" (在室中) or "outside" (退室済)
-	LastEventTime  time.Time `json:"lastEventTime"`
-	StayDuration   string    `json:"stayDuration"`  // 在室中の場合は現在までの滞在時間
+	CardID        string    `json:"cardId"`
+	UserName      string    `json:"userName"`
+	RoleName      string    `json:"roleName"`
+	StudentNo     string    `json:"studentNo"`
+	CurrentStatus string    `json:"currentStatus"` // "inside" (在室中) or "outside" (退室済)
+	LastEventTime time.Time `json:"lastEventTime"`
+	StayDuration  string    `json:"stayDuration"` // 在室中の場合は現在までの滞在時間
 }
 
 // DashboardStats ダッシュボード統計
@@ -71,8 +71,8 @@ func InitDB(dbPath string) (*DBManager, error) {
 		return nil, fmt.Errorf("failed to open sqlite database: %w", err)
 	}
 
-	// コネクションプール設定
-	db.SetMaxOpenConns(1) // SQLiteの書き込み競合を防ぐため1に設定 (WALモードと合わせて安全化)
+	// コネクションプール設定 (書き込み競合防止)
+	db.SetMaxOpenConns(1)
 
 	mgr := &DBManager{db: db}
 	if err := mgr.createTables(); err != nil {
@@ -93,7 +93,7 @@ func (m *DBManager) createTables() error {
 		card_id TEXT PRIMARY KEY,
 		name TEXT NOT NULL,
 		role_name TEXT NOT NULL,
-		role_code INTEGER NOT NULL DEFAULT 1,
+		role_code INTEGER NOT NULL DEFAULT 1, -- 0:教職員, 1:学生, 9:学生スタッフ
 		student_no TEXT NOT NULL DEFAULT '',
 		created_at DATETIME NOT NULL,
 		updated_at DATETIME NOT NULL
@@ -102,7 +102,7 @@ func (m *DBManager) createTables() error {
 	CREATE TABLE IF NOT EXISTS access_logs (
 		id INTEGER PRIMARY KEY AUTOINCREMENT,
 		card_id TEXT NOT NULL,
-		event_type TEXT NOT NULL, -- 'entry' or 'exit'
+		event_type TEXT NOT NULL, -- 'entry', 'exit', 'force_exit'
 		timestamp DATETIME NOT NULL,
 		duration_second INTEGER NOT NULL DEFAULT 0,
 		FOREIGN KEY(card_id) REFERENCES registered_users(card_id) ON DELETE CASCADE
@@ -204,35 +204,6 @@ func (m *DBManager) DeleteUser(cardID string) error {
 	return err
 }
 
-// GetLastLog 該当カードの直近ログを取得
-func (m *DBManager) GetLastLog(cardID string) (*AccessLog, error) {
-	m.mu.RLock()
-	defer m.mu.RUnlock()
-
-	query := `
-	SELECT id, card_id, event_type, timestamp, duration_second
-	FROM access_logs
-	WHERE card_id = ?
-	ORDER BY id DESC LIMIT 1
-	`
-	row := m.db.QueryRow(query, cardID)
-
-	var log AccessLog
-	var tsStr string
-	err := row.Scan(&log.ID, &log.CardID, &log.EventType, &tsStr, &log.DurationSecond)
-	if err != nil {
-		if err == sql.ErrNoRows {
-			return nil, nil
-		}
-		return nil, err
-	}
-	log.Timestamp, _ = time.Parse(time.RFC3339, tsStr)
-	if log.Timestamp.IsZero() {
-		log.Timestamp, _ = time.Parse("2006-01-02 15:04:05", tsStr)
-	}
-	return &log, nil
-}
-
 // RecordSwipe 打刻処理 (入退室判定＆ログ記録)
 func (m *DBManager) RecordSwipe(user *RegisteredUser) (*AccessLog, error) {
 	m.mu.Lock()
@@ -248,11 +219,10 @@ func (m *DBManager) RecordSwipe(user *RegisteredUser) (*AccessLog, error) {
 	row := m.db.QueryRow(queryLast, user.CardID)
 	err := row.Scan(&lastID, &lastEventType, &lastTsStr)
 
-	eventType := "entry" // デフォルトは入室 (1回目/奇数回)
+	eventType := "entry" // デフォルトは入室 (1回目/奇数回、または前回退室/強制退室時)
 	var durationSec int64 = 0
 
 	if err == nil {
-		// 前回の打刻が存在する場合
 		if lastEventType == "entry" {
 			// 前回入室 -> 今回は退室
 			eventType = "exit"
@@ -265,7 +235,7 @@ func (m *DBManager) RecordSwipe(user *RegisteredUser) (*AccessLog, error) {
 				durationSec = 0
 			}
 		} else {
-			// 前回退室 -> 今回は入室
+			// 前回 exit または force_exit -> 今回は入室
 			eventType = "entry"
 		}
 	}
@@ -280,7 +250,7 @@ func (m *DBManager) RecordSwipe(user *RegisteredUser) (*AccessLog, error) {
 	newID, _ := res.LastInsertId()
 
 	durationText := ""
-	if eventType == "exit" && durationSec > 0 {
+	if (eventType == "exit" || eventType == "force_exit") && durationSec > 0 {
 		durationText = FormatDuration(durationSec)
 	}
 
@@ -296,6 +266,79 @@ func (m *DBManager) RecordSwipe(user *RegisteredUser) (*AccessLog, error) {
 		DurationSecond: durationSec,
 		DurationText:   durationText,
 	}, nil
+}
+
+// ForceExitAllInsideUsers 23:00等に在室中の全ユーザーを一括強制退室処理する
+func (m *DBManager) ForceExitAllInsideUsers(exitTime time.Time) (int, error) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+
+	// 現在在室中（最新ログが 'entry'）のカード一覧と入室日時を取得
+	query := `
+	SELECT 
+		l.card_id, l.timestamp
+	FROM access_logs l
+	INNER JOIN (
+		SELECT card_id, MAX(id) as max_id FROM access_logs GROUP BY card_id
+	) latest ON l.id = latest.max_id
+	WHERE l.event_type = 'entry'
+	`
+	rows, err := m.db.Query(query)
+	if err != nil {
+		return 0, err
+	}
+	defer rows.Close()
+
+	type insideEntry struct {
+		cardID    string
+		entryTime time.Time
+	}
+	var targets []insideEntry
+
+	for rows.Next() {
+		var cardID, tsStr string
+		if err := rows.Scan(&cardID, &tsStr); err != nil {
+			return 0, err
+		}
+		t, _ := time.Parse(time.RFC3339, tsStr)
+		if t.IsZero() {
+			t, _ = time.Parse("2006-01-02 15:04:05", tsStr)
+		}
+		targets = append(targets, insideEntry{cardID: cardID, entryTime: t})
+	}
+
+	if len(targets) == 0 {
+		return 0, nil
+	}
+
+	tx, err := m.db.Begin()
+	if err != nil {
+		return 0, err
+	}
+	defer tx.Rollback()
+
+	insertStmt, err := tx.Prepare(`INSERT INTO access_logs (card_id, event_type, timestamp, duration_second) VALUES (?, 'force_exit', ?, ?)`)
+	if err != nil {
+		return 0, err
+	}
+	defer insertStmt.Close()
+
+	for _, item := range targets {
+		durationSec := int64(exitTime.Sub(item.entryTime).Seconds())
+		if durationSec < 0 {
+			durationSec = 0
+		}
+		_, err := insertStmt.Exec(item.cardID, exitTime.Format(time.RFC3339), durationSec)
+		if err != nil {
+			return 0, err
+		}
+	}
+
+	if err := tx.Commit(); err != nil {
+		return 0, err
+	}
+
+	return len(targets), nil
 }
 
 // GetRecentLogs 直近の打刻ログ一覧取得 (limit件)
@@ -336,7 +379,7 @@ func (m *DBManager) GetRecentLogs(limit int) ([]AccessLog, error) {
 		if l.Timestamp.IsZero() {
 			l.Timestamp, _ = time.Parse("2006-01-02 15:04:05", tsStr)
 		}
-		if l.EventType == "exit" && l.DurationSecond > 0 {
+		if (l.EventType == "exit" || l.EventType == "force_exit") && l.DurationSecond > 0 {
 			l.DurationText = FormatDuration(l.DurationSecond)
 		}
 		logs = append(logs, l)
@@ -361,7 +404,6 @@ func (m *DBManager) GetDashboardStats() (*DashboardStats, error) {
 	todayStart := time.Now().Format("2006-01-02") + "T00:00:00"
 	err = m.db.QueryRow("SELECT COUNT(*) FROM access_logs WHERE timestamp >= ?", todayStart).Scan(&stats.TodayLogCount)
 	if err != nil {
-		// 日付フォーマット差異のフォールバック
 		todayDate := time.Now().Format("2006-01-02")
 		_ = m.db.QueryRow("SELECT COUNT(*) FROM access_logs WHERE timestamp LIKE ?", todayDate+"%").Scan(&stats.TodayLogCount)
 	}
@@ -449,7 +491,7 @@ func (m *DBManager) GetFiscalYearLogs(fiscalYear int) ([]AccessLog, error) {
 	SELECT 
 		l.id, l.card_id, COALESCE(u.name, '未登録') as user_name,
 		COALESCE(u.role_name, '未登録') as role_name,
-		COALESCE(u.role_code, 0) as role_code,
+		COALESCE(u.role_code, 1) as role_code,
 		COALESCE(u.student_no, '') as student_no,
 		l.event_type, l.timestamp, l.duration_second
 	FROM access_logs l
@@ -474,7 +516,7 @@ func (m *DBManager) GetFiscalYearLogs(fiscalYear int) ([]AccessLog, error) {
 		if l.Timestamp.IsZero() {
 			l.Timestamp, _ = time.Parse("2006-01-02 15:04:05", tsStr)
 		}
-		if l.EventType == "exit" && l.DurationSecond > 0 {
+		if (l.EventType == "exit" || l.EventType == "force_exit") && l.DurationSecond > 0 {
 			l.DurationText = FormatDuration(l.DurationSecond)
 		}
 		logs = append(logs, l)

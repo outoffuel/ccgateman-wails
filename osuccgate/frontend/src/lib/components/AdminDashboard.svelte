@@ -79,9 +79,9 @@
   }
 
   function handleRoleChange() {
-    if (formRoleName === '教職員') formRoleCode = 9;
-    else if (formRoleName === 'スタッフ') formRoleCode = 5;
+    if (formRoleName === '教職員') formRoleCode = 0;
     else if (formRoleName === '学生') formRoleCode = 1;
+    else if (formRoleName === '学生スタッフ') formRoleCode = 9;
     else formRoleCode = 1;
   }
 
@@ -252,6 +252,7 @@
                   <th class="p-3.5">区分</th>
                   <th class="p-3.5">学籍/職員番号</th>
                   <th class="p-3.5">ステータス</th>
+                  <th class="p-3.5">入力方法</th>
                   <th class="p-3.5 rounded-r-xl">滞在時間</th>
                 </tr>
               </thead>
@@ -261,15 +262,36 @@
                     <td class="p-3.5 font-mono text-xs text-slate-400">{formatDate(log.timestamp)}</td>
                     <td class="p-3.5 font-bold text-white text-base">{log.userName || '未登録'}</td>
                     <td class="p-3.5">
-                      <span class={`px-2.5 py-1 rounded-full text-xs font-semibold ${log.roleCode === 9 ? 'bg-purple-950 text-purple-300 border border-purple-800' : 'bg-slate-800 text-slate-300'}`}>
+                      <span class={`px-2.5 py-1 rounded-full text-xs font-semibold ${log.roleCode === 0 ? 'bg-purple-950 text-purple-300 border border-purple-800' : (log.roleCode === 9 ? 'bg-emerald-950 text-emerald-300 border border-emerald-800' : 'bg-slate-800 text-slate-300')}`}>
                         {log.roleName || '-'}
                       </span>
                     </td>
                     <td class="p-3.5 font-mono text-slate-300">{log.studentNo || '-'}</td>
                     <td class="p-3.5">
-                      <span class={`inline-flex items-center px-3 py-1 rounded-xl text-xs font-black ${log.eventType === 'entry' ? 'bg-blue-950/80 text-blue-400 border border-blue-700/60' : 'bg-amber-950/80 text-amber-400 border border-amber-700/60'}`}>
-                        {log.eventType === 'entry' ? '🔵 入室' : '🟠 退室'}
-                      </span>
+                      {#if log.eventType === 'entry'}
+                        <span class="inline-flex items-center px-3 py-1 rounded-xl text-xs font-black bg-blue-950/80 text-blue-400 border border-blue-700/60">
+                          🔵 入室
+                        </span>
+                      {:else if log.eventType === 'exit'}
+                        <span class="inline-flex items-center px-3 py-1 rounded-xl text-xs font-black bg-amber-950/80 text-amber-400 border border-amber-700/60">
+                          🟠 退室
+                        </span>
+                      {:else if log.eventType === 'force_exit'}
+                        <span class="inline-flex items-center px-3 py-1 rounded-xl text-xs font-black bg-rose-950/80 text-rose-400 border border-rose-700/60">
+                          ⚠️ 強制退室
+                        </span>
+                      {/if}
+                    </td>
+                    <td class="p-3.5">
+                      {#if log.eventType === 'force_exit'}
+                        <span class="text-xs text-rose-300 font-semibold flex items-center gap-1">
+                          ⚙️ システム自動 (23:00)
+                        </span>
+                      {:else}
+                        <span class="text-xs text-slate-400">
+                          🪪 カード読み取り
+                        </span>
+                      {/if}
                     </td>
                     <td class="p-3.5 font-mono text-slate-400 font-semibold">{log.durationText || '-'}</td>
                   </tr>
@@ -339,7 +361,7 @@
                     <td class="p-3.5 font-mono text-xs text-slate-400">{u.cardId}</td>
                     <td class="p-3.5 font-bold text-white text-base">{u.name}</td>
                     <td class="p-3.5">
-                      <span class={`px-2.5 py-1 rounded-full text-xs font-semibold ${u.roleCode === 9 ? 'bg-purple-950 text-purple-300 border border-purple-800' : 'bg-slate-800 text-slate-300'}`}>
+                      <span class={`px-2.5 py-1 rounded-full text-xs font-semibold ${u.roleCode === 0 ? 'bg-purple-950 text-purple-300 border border-purple-800' : (u.roleCode === 9 ? 'bg-emerald-950 text-emerald-300 border border-emerald-800' : 'bg-slate-800 text-slate-300')}`}>
                         {u.roleName} ({u.roleCode})
                       </span>
                     </td>
@@ -409,10 +431,9 @@
                 on:change={handleRoleChange}
                 class="w-full bg-slate-800 border border-slate-700 text-white rounded-xl px-3.5 py-2.5 text-sm focus:outline-none focus:border-blue-500"
               >
-                <option value="学生">学生</option>
                 <option value="教職員">教職員</option>
-                <option value="スタッフ">スタッフ</option>
-                <option value="来客">来客</option>
+                <option value="学生">学生</option>
+                <option value="学生スタッフ">学生スタッフ</option>
               </select>
             </div>
 
@@ -421,7 +442,8 @@
               <input 
                 type="number" 
                 bind:value={formRoleCode} 
-                class="w-full bg-slate-800 border border-slate-700 text-white rounded-xl px-3.5 py-2.5 text-sm font-mono focus:outline-none focus:border-blue-500"
+                readonly
+                class="w-full bg-slate-800/50 border border-slate-700 text-slate-400 rounded-xl px-3.5 py-2.5 text-sm font-mono focus:outline-none"
               />
             </div>
           </div>

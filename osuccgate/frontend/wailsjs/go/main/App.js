@@ -38,6 +38,10 @@ export function ClearAllLogs() {
   return window['go']['main']['App']['ClearAllLogs']();
 }
 
+export function ForceExitAllInside() {
+  return window['go']['main']['App']['ForceExitAllInside']();
+}
+
 export function ExportFiscalYearLogsCSV(arg1) {
   return window['go']['main']['App']['ExportFiscalYearLogsCSV'](arg1);
 }
