@@ -20,6 +20,168 @@
   let insideUsers = [];
   let isAdvancedOpen = false;
 
+  // 1. ソートステート
+  let logsSortKey = 'timestamp';
+  let logsSortDir = 'desc'; // デフォルト: 打刻日時の新しい順
+
+  let insideSortKey = 'lastEventTime';
+  let insideSortDir = 'desc'; // デフォルト: 入室日時の新しい順
+
+  let usersSortKey = 'roleCode';
+  let usersSortDir = 'asc'; // デフォルト: 区分順
+
+  // 2. 列幅ステート (px)
+  let logsWidths = {
+    timestamp: 180,
+    userName: 140,
+    roleName: 110,
+    studentNo: 140,
+    eventType: 130,
+    method: 140,
+    duration: 120
+  };
+
+  let insideWidths = {
+    userName: 200,
+    roleName: 140,
+    studentNo: 160,
+    lastEventTime: 160,
+    stayDuration: 180
+  };
+
+  let usersWidths = {
+    adminNo: 80,
+    studentNo: 140,
+    name: 150,
+    furigana: 150,
+    gender: 90,
+    roleName: 130,
+    contact: 160,
+    purpose: 180,
+    cardId: 150,
+    actions: 90
+  };
+
+  // リサイズドラッグハンドラー
+  let isResizing = false;
+  let activeResizeTable = null;
+  let activeResizeCol = null;
+  let startX = 0;
+  let startWidth = 0;
+
+  function startResize(e, table, colKey) {
+    e.stopPropagation();
+    e.preventDefault();
+    isResizing = true;
+    activeResizeTable = table;
+    activeResizeCol = colKey;
+    startX = e.clientX;
+
+    if (table === 'logs') startWidth = logsWidths[colKey];
+    else if (table === 'inside') startWidth = insideWidths[colKey];
+    else if (table === 'users') startWidth = usersWidths[colKey];
+
+    window.addEventListener('mousemove', handleResizeMove);
+    window.addEventListener('mouseup', handleResizeEnd);
+  }
+
+  function handleResizeMove(e) {
+    if (!isResizing) return;
+    const delta = e.clientX - startX;
+    const newWidth = Math.max(50, startWidth + delta);
+
+    if (activeResizeTable === 'logs') {
+      logsWidths = { ...logsWidths, [activeResizeCol]: newWidth };
+    } else if (activeResizeTable === 'inside') {
+      insideWidths = { ...insideWidths, [activeResizeCol]: newWidth };
+    } else if (activeResizeTable === 'users') {
+      usersWidths = { ...usersWidths, [activeResizeCol]: newWidth };
+    }
+  }
+
+  function handleResizeEnd() {
+    isResizing = false;
+    activeResizeTable = null;
+    activeResizeCol = null;
+    window.removeEventListener('mousemove', handleResizeMove);
+    window.removeEventListener('mouseup', handleResizeEnd);
+  }
+
+  // 汎用ソート処理関数
+  function sortData(list, key, dir, customExtractors = {}) {
+    if (!list || list.length === 0) return [];
+    const sorted = [...list];
+    sorted.sort((a, b) => {
+      let valA = customExtractors[key] ? customExtractors[key](a) : a[key];
+      let valB = customExtractors[key] ? customExtractors[key](b) : b[key];
+
+      if (valA === undefined || valA === null) valA = '';
+      if (valB === undefined || valB === null) valB = '';
+
+      let comparison = 0;
+      if (typeof valA === 'number' && typeof valB === 'number') {
+        comparison = valA - valB;
+      } else {
+        const numA = Number(valA);
+        const numB = Number(valB);
+        if (!isNaN(numA) && !isNaN(numB) && String(valA).trim() !== '' && String(valB).trim() !== '') {
+          comparison = numA - numB;
+        } else {
+          comparison = String(valA).localeCompare(String(valB), 'ja', { numeric: true, sensitivity: 'base' });
+        }
+      }
+
+      return dir === 'asc' ? comparison : -comparison;
+    });
+    return sorted;
+  }
+
+  function handleSort(tab, key) {
+    if (tab === 'logs') {
+      if (logsSortKey === key) {
+        logsSortDir = logsSortDir === 'asc' ? 'desc' : 'asc';
+      } else {
+        logsSortKey = key;
+        logsSortDir = 'asc';
+      }
+    } else if (tab === 'inside') {
+      if (insideSortKey === key) {
+        insideSortDir = insideSortDir === 'asc' ? 'desc' : 'asc';
+      } else {
+        insideSortKey = key;
+        insideSortDir = 'asc';
+      }
+    } else if (tab === 'users') {
+      if (usersSortKey === key) {
+        usersSortDir = usersSortDir === 'asc' ? 'desc' : 'asc';
+      } else {
+        usersSortKey = key;
+        usersSortDir = 'asc';
+      }
+    }
+  }
+
+  // ソート済みデータ
+  $: sortedLogs = sortData(logs, logsSortKey, logsSortDir, {
+    timestamp: item => new Date(item.timestamp).getTime(),
+    duration: item => item.durationSecond || 0
+  });
+
+  $: sortedInsideUsers = sortData(insideUsers, insideSortKey, insideSortDir, {
+    lastEventTime: item => new Date(item.lastEventTime).getTime(),
+    stayDuration: item => {
+      const t = new Date(item.lastEventTime).getTime();
+      return isNaN(t) ? 0 : Date.now() - t;
+    }
+  });
+
+  $: sortedUsers = sortData(users, usersSortKey, usersSortDir, {
+    adminNo: item => {
+      const n = parseInt(item.adminNo, 10);
+      return isNaN(n) ? item.adminNo || '' : n;
+    }
+  });
+
   // ユーザー編集/登録用モーダルステート
   let isUserModalOpen = false;
   let editingUser = null;
@@ -59,7 +221,18 @@
     refreshTimer = setInterval(loadData, 10000);
     return () => {
       if (refreshTimer) clearInterval(refreshTimer);
+      if (typeof window !== 'undefined') {
+        window.removeEventListener('mousemove', handleResizeMove);
+        window.removeEventListener('mouseup', handleResizeEnd);
+      }
     };
+  });
+
+  onDestroy(() => {
+    if (typeof window !== 'undefined') {
+      window.removeEventListener('mousemove', handleResizeMove);
+      window.removeEventListener('mouseup', handleResizeEnd);
+    }
   });
 
   function openNewUserModal() {
@@ -280,30 +453,120 @@
           <div class="text-center py-16 text-slate-500 text-sm">打刻ログはまだ記録されていません</div>
         {:else}
           <div class="overflow-x-auto">
-            <table class="w-full text-left text-sm text-slate-300">
-              <thead class="text-xs text-slate-400 uppercase bg-slate-800/60 border-b border-slate-800">
+            <table class="text-left text-sm text-slate-300 border-collapse" style="table-layout: fixed; width: max-content; min-width: 100%;">
+              <colgroup>
+                <col style="width: {logsWidths.timestamp}px;">
+                <col style="width: {logsWidths.userName}px;">
+                <col style="width: {logsWidths.roleName}px;">
+                <col style="width: {logsWidths.studentNo}px;">
+                <col style="width: {logsWidths.eventType}px;">
+                <col style="width: {logsWidths.method}px;">
+                <col style="width: {logsWidths.duration}px;">
+              </colgroup>
+              <thead class="text-xs text-slate-400 uppercase bg-slate-800/60 border-b border-slate-800 select-none">
                 <tr>
-                  <th class="p-3.5 rounded-l-xl">打刻日時</th>
-                  <th class="p-3.5">氏名</th>
-                  <th class="p-3.5">区分</th>
-                  <th class="p-3.5">学籍/職員番号</th>
-                  <th class="p-3.5">ステータス</th>
-                  <th class="p-3.5">入力方法</th>
-                  <th class="p-3.5 rounded-r-xl">滞在時間</th>
+                  <th 
+                    class="p-3.5 rounded-l-xl cursor-pointer hover:bg-slate-800/90 transition relative group"
+                    on:click={() => handleSort('logs', 'timestamp')}
+                  >
+                    <div class="flex items-center justify-between pr-2">
+                      <span>打刻日時</span>
+                      <span class="text-xs font-mono {logsSortKey === 'timestamp' ? 'text-blue-400 font-bold' : 'text-slate-600 group-hover:text-slate-400'}">
+                        {logsSortKey === 'timestamp' ? (logsSortDir === 'asc' ? '▲' : '▼') : '↕'}
+                      </span>
+                    </div>
+                    <div class="resizer" on:mousedown={(e) => startResize(e, 'logs', 'timestamp')} />
+                  </th>
+
+                  <th 
+                    class="p-3.5 cursor-pointer hover:bg-slate-800/90 transition relative group"
+                    on:click={() => handleSort('logs', 'userName')}
+                  >
+                    <div class="flex items-center justify-between pr-2">
+                      <span>氏名</span>
+                      <span class="text-xs font-mono {logsSortKey === 'userName' ? 'text-blue-400 font-bold' : 'text-slate-600 group-hover:text-slate-400'}">
+                        {logsSortKey === 'userName' ? (logsSortDir === 'asc' ? '▲' : '▼') : '↕'}
+                      </span>
+                    </div>
+                    <div class="resizer" on:mousedown={(e) => startResize(e, 'logs', 'userName')} />
+                  </th>
+
+                  <th 
+                    class="p-3.5 cursor-pointer hover:bg-slate-800/90 transition relative group"
+                    on:click={() => handleSort('logs', 'roleName')}
+                  >
+                    <div class="flex items-center justify-between pr-2">
+                      <span>区分</span>
+                      <span class="text-xs font-mono {logsSortKey === 'roleName' ? 'text-blue-400 font-bold' : 'text-slate-600 group-hover:text-slate-400'}">
+                        {logsSortKey === 'roleName' ? (logsSortDir === 'asc' ? '▲' : '▼') : '↕'}
+                      </span>
+                    </div>
+                    <div class="resizer" on:mousedown={(e) => startResize(e, 'logs', 'roleName')} />
+                  </th>
+
+                  <th 
+                    class="p-3.5 cursor-pointer hover:bg-slate-800/90 transition relative group"
+                    on:click={() => handleSort('logs', 'studentNo')}
+                  >
+                    <div class="flex items-center justify-between pr-2">
+                      <span>学籍/職員番号</span>
+                      <span class="text-xs font-mono {logsSortKey === 'studentNo' ? 'text-blue-400 font-bold' : 'text-slate-600 group-hover:text-slate-400'}">
+                        {logsSortKey === 'studentNo' ? (logsSortDir === 'asc' ? '▲' : '▼') : '↕'}
+                      </span>
+                    </div>
+                    <div class="resizer" on:mousedown={(e) => startResize(e, 'logs', 'studentNo')} />
+                  </th>
+
+                  <th 
+                    class="p-3.5 cursor-pointer hover:bg-slate-800/90 transition relative group"
+                    on:click={() => handleSort('logs', 'eventType')}
+                  >
+                    <div class="flex items-center justify-between pr-2">
+                      <span>ステータス</span>
+                      <span class="text-xs font-mono {logsSortKey === 'eventType' ? 'text-blue-400 font-bold' : 'text-slate-600 group-hover:text-slate-400'}">
+                        {logsSortKey === 'eventType' ? (logsSortDir === 'asc' ? '▲' : '▼') : '↕'}
+                      </span>
+                    </div>
+                    <div class="resizer" on:mousedown={(e) => startResize(e, 'logs', 'eventType')} />
+                  </th>
+
+                  <th 
+                    class="p-3.5 cursor-pointer hover:bg-slate-800/90 transition relative group"
+                    on:click={() => handleSort('logs', 'eventType')}
+                  >
+                    <div class="flex items-center justify-between pr-2">
+                      <span>入力方法</span>
+                      <span class="text-xs font-mono text-slate-600 group-hover:text-slate-400">↕</span>
+                    </div>
+                    <div class="resizer" on:mousedown={(e) => startResize(e, 'logs', 'method')} />
+                  </th>
+
+                  <th 
+                    class="p-3.5 rounded-r-xl cursor-pointer hover:bg-slate-800/90 transition relative group"
+                    on:click={() => handleSort('logs', 'duration')}
+                  >
+                    <div class="flex items-center justify-between pr-2">
+                      <span>滞在時間</span>
+                      <span class="text-xs font-mono {logsSortKey === 'duration' ? 'text-blue-400 font-bold' : 'text-slate-600 group-hover:text-slate-400'}">
+                        {logsSortKey === 'duration' ? (logsSortDir === 'asc' ? '▲' : '▼') : '↕'}
+                      </span>
+                    </div>
+                    <div class="resizer" on:mousedown={(e) => startResize(e, 'logs', 'duration')} />
+                  </th>
                 </tr>
               </thead>
               <tbody class="divide-y divide-slate-800/60">
-                {#each logs as log}
+                {#each sortedLogs as log}
                   <tr class="hover:bg-slate-800/40 transition">
-                    <td class="p-3.5 font-mono text-xs text-slate-400">{formatDate(log.timestamp)}</td>
-                    <td class="p-3.5 font-bold text-white text-base">{log.userName || '未登録'}</td>
-                    <td class="p-3.5">
+                    <td class="p-3.5 font-mono text-xs text-slate-400 truncate">{formatDate(log.timestamp)}</td>
+                    <td class="p-3.5 font-bold text-white text-base truncate">{log.userName || '未登録'}</td>
+                    <td class="p-3.5 truncate">
                       <span class={`px-2.5 py-1 rounded-full text-xs font-semibold ${log.roleCode === 0 ? 'bg-purple-950 text-purple-300 border border-purple-800' : (log.roleCode === 9 ? 'bg-emerald-950 text-emerald-300 border border-emerald-800' : 'bg-slate-800 text-slate-300')}`}>
                         {log.roleName || '-'}
                       </span>
                     </td>
-                    <td class="p-3.5 font-mono text-slate-300">{log.studentNo || '-'}</td>
-                    <td class="p-3.5">
+                    <td class="p-3.5 font-mono text-slate-300 truncate">{log.studentNo || '-'}</td>
+                    <td class="p-3.5 truncate">
                       {#if log.eventType === 'entry'}
                         <span class="inline-flex items-center px-3 py-1 rounded-xl text-xs font-black bg-blue-950/80 text-blue-400 border border-blue-700/60">
                           🔵 入室
@@ -318,7 +581,7 @@
                         </span>
                       {/if}
                     </td>
-                    <td class="p-3.5">
+                    <td class="p-3.5 truncate">
                       {#if log.eventType === 'force_exit'}
                         <span class="text-xs text-rose-300 font-semibold flex items-center gap-1">
                           ⚙️ システム自動 (23:00)
@@ -329,7 +592,7 @@
                         </span>
                       {/if}
                     </td>
-                    <td class="p-3.5 font-mono text-slate-400 font-semibold">{log.durationText || '-'}</td>
+                    <td class="p-3.5 font-mono text-slate-400 font-semibold truncate">{log.durationText || '-'}</td>
                   </tr>
                 {/each}
               </tbody>
@@ -343,31 +606,97 @@
           <div class="text-center py-16 text-slate-500 text-sm">現在在室中の利用者はいません</div>
         {:else}
           <div class="overflow-x-auto">
-            <table class="w-full text-left text-sm text-slate-300">
-              <thead class="text-xs text-slate-400 uppercase bg-slate-800/60 border-b border-slate-800">
+            <table class="text-left text-sm text-slate-300 border-collapse" style="table-layout: fixed; width: max-content; min-width: 100%;">
+              <colgroup>
+                <col style="width: {insideWidths.userName}px;">
+                <col style="width: {insideWidths.roleName}px;">
+                <col style="width: {insideWidths.studentNo}px;">
+                <col style="width: {insideWidths.lastEventTime}px;">
+                <col style="width: {insideWidths.stayDuration}px;">
+              </colgroup>
+              <thead class="text-xs text-slate-400 uppercase bg-slate-800/60 border-b border-slate-800 select-none">
                 <tr>
-                  <th class="p-3.5 rounded-l-xl">氏名</th>
-                  <th class="p-3.5">区分</th>
-                  <th class="p-3.5">学籍/職員番号</th>
-                  <th class="p-3.5">入室時刻</th>
-                  <th class="p-3.5 rounded-r-xl">現在の滞在時間</th>
+                  <th 
+                    class="p-3.5 rounded-l-xl cursor-pointer hover:bg-slate-800/90 transition relative group"
+                    on:click={() => handleSort('inside', 'userName')}
+                  >
+                    <div class="flex items-center justify-between pr-2">
+                      <span>氏名</span>
+                      <span class="text-xs font-mono {insideSortKey === 'userName' ? 'text-blue-400 font-bold' : 'text-slate-600 group-hover:text-slate-400'}">
+                        {insideSortKey === 'userName' ? (insideSortDir === 'asc' ? '▲' : '▼') : '↕'}
+                      </span>
+                    </div>
+                    <div class="resizer" on:mousedown={(e) => startResize(e, 'inside', 'userName')} />
+                  </th>
+
+                  <th 
+                    class="p-3.5 cursor-pointer hover:bg-slate-800/90 transition relative group"
+                    on:click={() => handleSort('inside', 'roleName')}
+                  >
+                    <div class="flex items-center justify-between pr-2">
+                      <span>区分</span>
+                      <span class="text-xs font-mono {insideSortKey === 'roleName' ? 'text-blue-400 font-bold' : 'text-slate-600 group-hover:text-slate-400'}">
+                        {insideSortKey === 'roleName' ? (insideSortDir === 'asc' ? '▲' : '▼') : '↕'}
+                      </span>
+                    </div>
+                    <div class="resizer" on:mousedown={(e) => startResize(e, 'inside', 'roleName')} />
+                  </th>
+
+                  <th 
+                    class="p-3.5 cursor-pointer hover:bg-slate-800/90 transition relative group"
+                    on:click={() => handleSort('inside', 'studentNo')}
+                  >
+                    <div class="flex items-center justify-between pr-2">
+                      <span>学籍/職員番号</span>
+                      <span class="text-xs font-mono {insideSortKey === 'studentNo' ? 'text-blue-400 font-bold' : 'text-slate-600 group-hover:text-slate-400'}">
+                        {insideSortKey === 'studentNo' ? (insideSortDir === 'asc' ? '▲' : '▼') : '↕'}
+                      </span>
+                    </div>
+                    <div class="resizer" on:mousedown={(e) => startResize(e, 'inside', 'studentNo')} />
+                  </th>
+
+                  <th 
+                    class="p-3.5 cursor-pointer hover:bg-slate-800/90 transition relative group"
+                    on:click={() => handleSort('inside', 'lastEventTime')}
+                  >
+                    <div class="flex items-center justify-between pr-2">
+                      <span>入室時刻</span>
+                      <span class="text-xs font-mono {insideSortKey === 'lastEventTime' ? 'text-blue-400 font-bold' : 'text-slate-600 group-hover:text-slate-400'}">
+                        {insideSortKey === 'lastEventTime' ? (insideSortDir === 'asc' ? '▲' : '▼') : '↕'}
+                      </span>
+                    </div>
+                    <div class="resizer" on:mousedown={(e) => startResize(e, 'inside', 'lastEventTime')} />
+                  </th>
+
+                  <th 
+                    class="p-3.5 rounded-r-xl cursor-pointer hover:bg-slate-800/90 transition relative group"
+                    on:click={() => handleSort('inside', 'stayDuration')}
+                  >
+                    <div class="flex items-center justify-between pr-2">
+                      <span>現在の滞在時間</span>
+                      <span class="text-xs font-mono {insideSortKey === 'stayDuration' ? 'text-blue-400 font-bold' : 'text-slate-600 group-hover:text-slate-400'}">
+                        {insideSortKey === 'stayDuration' ? (insideSortDir === 'asc' ? '▲' : '▼') : '↕'}
+                      </span>
+                    </div>
+                    <div class="resizer" on:mousedown={(e) => startResize(e, 'inside', 'stayDuration')} />
+                  </th>
                 </tr>
               </thead>
               <tbody class="divide-y divide-slate-800/60">
-                {#each insideUsers as u}
+                {#each sortedInsideUsers as u}
                   <tr class="hover:bg-slate-800/40 transition">
-                    <td class="p-3.5 font-bold text-white text-base flex items-center gap-2">
-                      <span class="w-2.5 h-2.5 rounded-full bg-emerald-400 animate-pulse"></span>
-                      {u.userName || '未登録'}
+                    <td class="p-3.5 font-bold text-white text-base flex items-center gap-2 truncate">
+                      <span class="w-2.5 h-2.5 rounded-full bg-emerald-400 animate-pulse shrink-0"></span>
+                      <span class="truncate">{u.userName || '未登録'}</span>
                     </td>
-                    <td class="p-3.5">
+                    <td class="p-3.5 truncate">
                       <span class="px-2.5 py-1 rounded-full text-xs font-semibold bg-slate-800 text-slate-300">
                         {u.roleName || '-'}
                       </span>
                     </td>
-                    <td class="p-3.5 font-mono text-slate-300">{u.studentNo || '-'}</td>
-                    <td class="p-3.5 font-mono text-xs text-slate-400">{formatTime(u.lastEventTime)}</td>
-                    <td class="p-3.5 font-bold text-blue-400 text-sm">{u.stayDuration || '数秒'}</td>
+                    <td class="p-3.5 font-mono text-slate-300 truncate">{u.studentNo || '-'}</td>
+                    <td class="p-3.5 font-mono text-xs text-slate-400 truncate">{formatTime(u.lastEventTime)}</td>
+                    <td class="p-3.5 font-bold text-blue-400 text-sm truncate">{u.stayDuration || '数秒'}</td>
                   </tr>
                 {/each}
               </tbody>
@@ -381,29 +710,151 @@
           <div class="text-center py-16 text-slate-500 text-sm">登録されている利用者はまだいません</div>
         {:else}
           <div class="overflow-x-auto">
-            <table class="w-full text-left text-sm text-slate-300">
-              <thead class="text-xs text-slate-400 uppercase bg-slate-800/60 border-b border-slate-800">
+            <table class="text-left text-sm text-slate-300 border-collapse" style="table-layout: fixed; width: max-content; min-width: 100%;">
+              <colgroup>
+                <col style="width: {usersWidths.adminNo}px;">
+                <col style="width: {usersWidths.studentNo}px;">
+                <col style="width: {usersWidths.name}px;">
+                <col style="width: {usersWidths.furigana}px;">
+                <col style="width: {usersWidths.gender}px;">
+                <col style="width: {usersWidths.roleName}px;">
+                <col style="width: {usersWidths.contact}px;">
+                <col style="width: {usersWidths.purpose}px;">
+                <col style="width: {usersWidths.cardId}px;">
+                <col style="width: {usersWidths.actions}px;">
+              </colgroup>
+              <thead class="text-xs text-slate-400 uppercase bg-slate-800/60 border-b border-slate-800 select-none">
                 <tr>
-                  <th class="p-3.5 rounded-l-xl">No.</th>
-                  <th class="p-3.5">学籍/職員番号</th>
-                  <th class="p-3.5">氏名</th>
-                  <th class="p-3.5">フリガナ</th>
-                  <th class="p-3.5">性別</th>
-                  <th class="p-3.5">区分</th>
-                  <th class="p-3.5">連絡先</th>
-                  <th class="p-3.5">利用目的</th>
-                  <th class="p-3.5">識別カードID</th>
-                  <th class="p-3.5 text-right rounded-r-xl">操作</th>
+                  <th 
+                    class="p-3.5 rounded-l-xl cursor-pointer hover:bg-slate-800/90 transition relative group"
+                    on:click={() => handleSort('users', 'adminNo')}
+                  >
+                    <div class="flex items-center justify-between pr-2">
+                      <span>No.</span>
+                      <span class="text-xs font-mono {usersSortKey === 'adminNo' ? 'text-blue-400 font-bold' : 'text-slate-600 group-hover:text-slate-400'}">
+                        {usersSortKey === 'adminNo' ? (usersSortDir === 'asc' ? '▲' : '▼') : '↕'}
+                      </span>
+                    </div>
+                    <div class="resizer" on:mousedown={(e) => startResize(e, 'users', 'adminNo')} />
+                  </th>
+
+                  <th 
+                    class="p-3.5 cursor-pointer hover:bg-slate-800/90 transition relative group"
+                    on:click={() => handleSort('users', 'studentNo')}
+                  >
+                    <div class="flex items-center justify-between pr-2">
+                      <span>学籍/職員番号</span>
+                      <span class="text-xs font-mono {usersSortKey === 'studentNo' ? 'text-blue-400 font-bold' : 'text-slate-600 group-hover:text-slate-400'}">
+                        {usersSortKey === 'studentNo' ? (usersSortDir === 'asc' ? '▲' : '▼') : '↕'}
+                      </span>
+                    </div>
+                    <div class="resizer" on:mousedown={(e) => startResize(e, 'users', 'studentNo')} />
+                  </th>
+
+                  <th 
+                    class="p-3.5 cursor-pointer hover:bg-slate-800/90 transition relative group"
+                    on:click={() => handleSort('users', 'name')}
+                  >
+                    <div class="flex items-center justify-between pr-2">
+                      <span>氏名</span>
+                      <span class="text-xs font-mono {usersSortKey === 'name' ? 'text-blue-400 font-bold' : 'text-slate-600 group-hover:text-slate-400'}">
+                        {usersSortKey === 'name' ? (usersSortDir === 'asc' ? '▲' : '▼') : '↕'}
+                      </span>
+                    </div>
+                    <div class="resizer" on:mousedown={(e) => startResize(e, 'users', 'name')} />
+                  </th>
+
+                  <th 
+                    class="p-3.5 cursor-pointer hover:bg-slate-800/90 transition relative group"
+                    on:click={() => handleSort('users', 'furigana')}
+                  >
+                    <div class="flex items-center justify-between pr-2">
+                      <span>フリガナ</span>
+                      <span class="text-xs font-mono {usersSortKey === 'furigana' ? 'text-blue-400 font-bold' : 'text-slate-600 group-hover:text-slate-400'}">
+                        {usersSortKey === 'furigana' ? (usersSortDir === 'asc' ? '▲' : '▼') : '↕'}
+                      </span>
+                    </div>
+                    <div class="resizer" on:mousedown={(e) => startResize(e, 'users', 'furigana')} />
+                  </th>
+
+                  <th 
+                    class="p-3.5 cursor-pointer hover:bg-slate-800/90 transition relative group"
+                    on:click={() => handleSort('users', 'gender')}
+                  >
+                    <div class="flex items-center justify-between pr-2">
+                      <span>性別</span>
+                      <span class="text-xs font-mono {usersSortKey === 'gender' ? 'text-blue-400 font-bold' : 'text-slate-600 group-hover:text-slate-400'}">
+                        {usersSortKey === 'gender' ? (usersSortDir === 'asc' ? '▲' : '▼') : '↕'}
+                      </span>
+                    </div>
+                    <div class="resizer" on:mousedown={(e) => startResize(e, 'users', 'gender')} />
+                  </th>
+
+                  <th 
+                    class="p-3.5 cursor-pointer hover:bg-slate-800/90 transition relative group"
+                    on:click={() => handleSort('users', 'roleCode')}
+                  >
+                    <div class="flex items-center justify-between pr-2">
+                      <span>区分</span>
+                      <span class="text-xs font-mono {usersSortKey === 'roleCode' ? 'text-blue-400 font-bold' : 'text-slate-600 group-hover:text-slate-400'}">
+                        {usersSortKey === 'roleCode' ? (usersSortDir === 'asc' ? '▲' : '▼') : '↕'}
+                      </span>
+                    </div>
+                    <div class="resizer" on:mousedown={(e) => startResize(e, 'users', 'roleCode')} />
+                  </th>
+
+                  <th 
+                    class="p-3.5 cursor-pointer hover:bg-slate-800/90 transition relative group"
+                    on:click={() => handleSort('users', 'contact')}
+                  >
+                    <div class="flex items-center justify-between pr-2">
+                      <span>連絡先</span>
+                      <span class="text-xs font-mono {usersSortKey === 'contact' ? 'text-blue-400 font-bold' : 'text-slate-600 group-hover:text-slate-400'}">
+                        {usersSortKey === 'contact' ? (usersSortDir === 'asc' ? '▲' : '▼') : '↕'}
+                      </span>
+                    </div>
+                    <div class="resizer" on:mousedown={(e) => startResize(e, 'users', 'contact')} />
+                  </th>
+
+                  <th 
+                    class="p-3.5 cursor-pointer hover:bg-slate-800/90 transition relative group"
+                    on:click={() => handleSort('users', 'purpose')}
+                  >
+                    <div class="flex items-center justify-between pr-2">
+                      <span>利用目的</span>
+                      <span class="text-xs font-mono {usersSortKey === 'purpose' ? 'text-blue-400 font-bold' : 'text-slate-600 group-hover:text-slate-400'}">
+                        {usersSortKey === 'purpose' ? (usersSortDir === 'asc' ? '▲' : '▼') : '↕'}
+                      </span>
+                    </div>
+                    <div class="resizer" on:mousedown={(e) => startResize(e, 'users', 'purpose')} />
+                  </th>
+
+                  <th 
+                    class="p-3.5 cursor-pointer hover:bg-slate-800/90 transition relative group"
+                    on:click={() => handleSort('users', 'cardId')}
+                  >
+                    <div class="flex items-center justify-between pr-2">
+                      <span>識別カードID</span>
+                      <span class="text-xs font-mono {usersSortKey === 'cardId' ? 'text-blue-400 font-bold' : 'text-slate-600 group-hover:text-slate-400'}">
+                        {usersSortKey === 'cardId' ? (usersSortDir === 'asc' ? '▲' : '▼') : '↕'}
+                      </span>
+                    </div>
+                    <div class="resizer" on:mousedown={(e) => startResize(e, 'users', 'cardId')} />
+                  </th>
+
+                  <th class="p-3.5 text-right rounded-r-xl relative">
+                    <span>操作</span>
+                  </th>
                 </tr>
               </thead>
               <tbody class="divide-y divide-slate-800/60">
-                {#each users as u}
+                {#each sortedUsers as u}
                   <tr class="hover:bg-slate-800/40 transition">
-                    <td class="p-3.5 font-mono text-xs text-slate-400">{u.adminNo || '-'}</td>
-                    <td class="p-3.5 font-mono font-bold text-white text-sm">{u.studentNo || '-'}</td>
-                    <td class="p-3.5 font-bold text-white text-base">{u.name}</td>
-                    <td class="p-3.5 text-xs text-slate-400">{u.furigana || '-'}</td>
-                    <td class="p-3.5 text-xs">
+                    <td class="p-3.5 font-mono text-xs text-slate-400 truncate">{u.adminNo || '-'}</td>
+                    <td class="p-3.5 font-mono font-bold text-white text-sm truncate">{u.studentNo || '-'}</td>
+                    <td class="p-3.5 font-bold text-white text-base truncate">{u.name}</td>
+                    <td class="p-3.5 text-xs text-slate-400 truncate">{u.furigana || '-'}</td>
+                    <td class="p-3.5 text-xs truncate">
                       {#if u.gender}
                         <span class={`px-2 py-0.5 rounded-full text-xs font-semibold ${u.gender === '男' ? 'bg-blue-950 text-blue-300 border border-blue-800' : (u.gender === '女' ? 'bg-pink-950 text-pink-300 border border-pink-800' : 'bg-slate-800 text-slate-300')}`}>
                           {u.gender}
@@ -412,14 +863,14 @@
                         <span class="text-slate-500">-</span>
                       {/if}
                     </td>
-                    <td class="p-3.5">
+                    <td class="p-3.5 truncate">
                       <span class={`px-2.5 py-1 rounded-full text-xs font-semibold ${u.roleCode === 0 ? 'bg-purple-950 text-purple-300 border border-purple-800' : (u.roleCode === 9 ? 'bg-emerald-950 text-emerald-300 border border-emerald-800' : 'bg-slate-800 text-slate-300')}`}>
                         {u.roleName}
                       </span>
                     </td>
-                    <td class="p-3.5 text-xs text-slate-300 max-w-[140px] truncate" title={u.contact || ''}>{u.contact || '-'}</td>
-                    <td class="p-3.5 text-xs text-slate-300 max-w-[160px] truncate" title={u.purpose || ''}>{u.purpose || '-'}</td>
-                    <td class="p-3.5 font-mono text-xs text-slate-400">{u.cardId}</td>
+                    <td class="p-3.5 text-xs text-slate-300 truncate" title={u.contact || ''}>{u.contact || '-'}</td>
+                    <td class="p-3.5 text-xs text-slate-300 truncate" title={u.purpose || ''}>{u.purpose || '-'}</td>
+                    <td class="p-3.5 font-mono text-xs text-slate-400 truncate">{u.cardId}</td>
                     <td class="p-3.5 text-right">
                       <button 
                         on:click={() => openEditUserModal(u)}
@@ -620,5 +1071,21 @@
   @keyframes fadeIn {
     from { opacity: 0; transform: scale(0.98); }
     to { opacity: 1; transform: scale(1); }
+  }
+
+  .resizer {
+    position: absolute;
+    top: 0;
+    right: 0;
+    width: 6px;
+    height: 100%;
+    cursor: col-resize;
+    user-select: none;
+    touch-action: none;
+    z-index: 10;
+  }
+
+  .resizer:hover {
+    background-color: #3b82f6;
   }
 </style>

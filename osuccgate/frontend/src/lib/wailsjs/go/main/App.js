@@ -50,10 +50,10 @@ export function SaveUser(arg1) {
   return window['go']['main']['App']['SaveUser'](arg1);
 }
 
-export function VerifyPIN(arg1) {
-  return window['go']['main']['App']['VerifyPIN'](arg1);
-}
-
 export function ToggleFullscreen() {
   return window['go']['main']['App']['ToggleFullscreen']();
+}
+
+export function VerifyPIN(arg1) {
+  return window['go']['main']['App']['VerifyPIN'](arg1);
 }

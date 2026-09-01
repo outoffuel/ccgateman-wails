@@ -27,4 +27,6 @@ export function ProcessSwipe(arg1:string):Promise<service.SwipeResponse>;
 
 export function SaveUser(arg1:db.RegisteredUser):Promise<void>;
 
+export function ToggleFullscreen():Promise<boolean>;
+
 export function VerifyPIN(arg1:string):Promise<boolean>;

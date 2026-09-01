@@ -435,15 +435,12 @@ body { font-family: 'Noto Sans JP', 'Inter', sans-serif; background-color: #0f17
 
     async function submitPin() {
       const pin = document.getElementById("pinInput").value;
-      const res = await fetch(API_BASE + '/api/auth/verify', {
+      const res = await fetch(API_BASE + '/api/verify-pin', {
         method: 'POST',
-        headers: {'Content-Type': 'application/json'},
-        body: JSON.stringify({pin: pin})
+        headers: { 'X-Admin-PIN': pin }
       });
-      const data = await res.json();
-      if (data.success) {
-        currentPIN = pin;
-        sessionStorage.setItem("admin_pin", pin);
+      if (res.ok) {
+        localStorage.setItem("adminPIN", pin);
         renderApp();
         loadAllData();
       } else {
@@ -552,21 +549,25 @@ body { font-family: 'Noto Sans JP', 'Inter', sans-serif; background-color: #0f17
           content.innerHTML = '<div class="text-center py-12 text-slate-500">打刻ログはまだありません</div>';
           return;
         }
+        const sorted = sortList(logs, logsSortKey, logsSortDir, {
+          timestamp: l => new Date(l.timestamp).getTime(),
+          duration: l => l.durationSecond || 0
+        }[logsSortKey]);
         content.innerHTML = ` + "`" + `
           <table class="w-full text-left text-sm text-slate-300">
-            <thead class="text-xs text-slate-400 uppercase bg-slate-800/50">
+            <thead class="text-xs text-slate-400 uppercase bg-slate-800/50 select-none">
               <tr>
-                <th class="p-3">日時</th>
-                <th class="p-3">氏名</th>
-                <th class="p-3">区分</th>
-                <th class="p-3">学籍/職員番号</th>
-                <th class="p-3">種別</th>
+                <th class="p-3 cursor-pointer hover:text-white" onclick="handleWebSort('logs', 'timestamp')">日時${sortIcon('logs', 'timestamp')}</th>
+                <th class="p-3 cursor-pointer hover:text-white" onclick="handleWebSort('logs', 'userName')">氏名${sortIcon('logs', 'userName')}</th>
+                <th class="p-3 cursor-pointer hover:text-white" onclick="handleWebSort('logs', 'roleCode')">区分${sortIcon('logs', 'roleCode')}</th>
+                <th class="p-3 cursor-pointer hover:text-white" onclick="handleWebSort('logs', 'studentNo')">学籍/職員番号${sortIcon('logs', 'studentNo')}</th>
+                <th class="p-3 cursor-pointer hover:text-white" onclick="handleWebSort('logs', 'eventType')">種別${sortIcon('logs', 'eventType')}</th>
                 <th class="p-3">入力方法</th>
-                <th class="p-3">滞在時間</th>
+                <th class="p-3 cursor-pointer hover:text-white" onclick="handleWebSort('logs', 'duration')">滞在時間${sortIcon('logs', 'duration')}</th>
               </tr>
             </thead>
             <tbody class="divide-y divide-slate-800">
-              ${logs.map(l => {
+              ${sorted.map(l => {
                 let badge = '<span class="px-2 py-1 rounded-md text-xs font-bold bg-blue-600/30 text-blue-400 border border-blue-500/30">🔵 入室</span>';
                 let method = '<span class="text-xs text-slate-400">カード</span>';
                 if (l.eventType === 'exit') {
@@ -597,19 +598,22 @@ body { font-family: 'Noto Sans JP', 'Inter', sans-serif; background-color: #0f17
           content.innerHTML = '<div class="text-center py-12 text-slate-500">現在在室中のユーザーはいません</div>';
           return;
         }
+        const sorted = sortList(insideUsers, insideSortKey, insideSortDir, {
+          lastEventTime: u => new Date(u.lastEventTime).getTime()
+        }[insideSortKey]);
         content.innerHTML = ` + "`" + `
           <table class="w-full text-left text-sm text-slate-300">
-            <thead class="text-xs text-slate-400 uppercase bg-slate-800/50">
+            <thead class="text-xs text-slate-400 uppercase bg-slate-800/50 select-none">
               <tr>
-                <th class="p-3">氏名</th>
-                <th class="p-3">区分</th>
-                <th class="p-3">学籍/職員番号</th>
-                <th class="p-3">入室時刻</th>
+                <th class="p-3 cursor-pointer hover:text-white" onclick="handleWebSort('inside', 'userName')">氏名${sortIcon('inside', 'userName')}</th>
+                <th class="p-3 cursor-pointer hover:text-white" onclick="handleWebSort('inside', 'roleCode')">区分${sortIcon('inside', 'roleCode')}</th>
+                <th class="p-3 cursor-pointer hover:text-white" onclick="handleWebSort('inside', 'studentNo')">学籍/職員番号${sortIcon('inside', 'studentNo')}</th>
+                <th class="p-3 cursor-pointer hover:text-white" onclick="handleWebSort('inside', 'lastEventTime')">入室時刻${sortIcon('inside', 'lastEventTime')}</th>
                 <th class="p-3">現在の滞在時間</th>
               </tr>
             </thead>
             <tbody class="divide-y divide-slate-800">
-              ${insideUsers.map(u => ` + "`" + `
+              ${sorted.map(u => ` + "`" + `
                 <tr class="hover:bg-slate-800/30">
                   <td class="p-3 font-bold text-white">${u.userName || '未登録'}</td>
                   <td class="p-3"><span class="px-2 py-0.5 rounded text-xs bg-slate-800 text-slate-300">${u.roleName || '-'}</span></td>
@@ -627,22 +631,25 @@ body { font-family: 'Noto Sans JP', 'Inter', sans-serif; background-color: #0f17
           content.innerHTML = '<div class="text-center py-12 text-slate-500">登録ユーザーはいません</div>';
           return;
         }
+        const sorted = sortList(users, usersSortKey, usersSortDir, {
+          adminNo: u => parseInt(u.adminNo, 10) || u.adminNo || ''
+        }[usersSortKey]);
         content.innerHTML = ` + "`" + `
           <table class="w-full text-left text-sm text-slate-300">
-            <thead class="text-xs text-slate-400 uppercase bg-slate-800/50">
+            <thead class="text-xs text-slate-400 uppercase bg-slate-800/50 select-none">
               <tr>
-                <th class="p-3">No.</th>
-                <th class="p-3">識別ID (磁気/NFC)</th>
-                <th class="p-3">氏名</th>
-                <th class="p-3">区分 (コード)</th>
-                <th class="p-3">学籍/職員番号</th>
-                <th class="p-3">連絡先</th>
-                <th class="p-3">利用目的</th>
+                <th class="p-3 cursor-pointer hover:text-white" onclick="handleWebSort('users', 'adminNo')">No.${sortIcon('users', 'adminNo')}</th>
+                <th class="p-3 cursor-pointer hover:text-white" onclick="handleWebSort('users', 'cardId')">識別ID${sortIcon('users', 'cardId')}</th>
+                <th class="p-3 cursor-pointer hover:text-white" onclick="handleWebSort('users', 'name')">氏名${sortIcon('users', 'name')}</th>
+                <th class="p-3 cursor-pointer hover:text-white" onclick="handleWebSort('users', 'roleCode')">区分 (コード)${sortIcon('users', 'roleCode')}</th>
+                <th class="p-3 cursor-pointer hover:text-white" onclick="handleWebSort('users', 'studentNo')">学籍/職員番号${sortIcon('users', 'studentNo')}</th>
+                <th class="p-3 cursor-pointer hover:text-white" onclick="handleWebSort('users', 'contact')">連絡先${sortIcon('users', 'contact')}</th>
+                <th class="p-3 cursor-pointer hover:text-white" onclick="handleWebSort('users', 'purpose')">利用目的${sortIcon('users', 'purpose')}</th>
                 <th class="p-3 text-right">操作</th>
               </tr>
             </thead>
             <tbody class="divide-y divide-slate-800">
-              ${users.map(u => ` + "`" + `
+              ${sorted.map(u => ` + "`" + `
                 <tr class="hover:bg-slate-800/30">
                   <td class="p-3 font-mono text-xs text-slate-400">${u.adminNo || '-'}</td>
                   <td class="p-3 font-mono text-xs text-slate-400">${u.cardId}</td>
