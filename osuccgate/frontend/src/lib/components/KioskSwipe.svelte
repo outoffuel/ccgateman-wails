@@ -176,11 +176,12 @@
 
 <style>
   .kiosk-container {
-    height: 100vh;
-    width: 100vw;
+    min-height: 100vh;
+    width: 100%;
     margin: 0;
-    padding: 0;
-    overflow: hidden;
+    padding: 20px;
+    box-sizing: border-box;
+    overflow-y: auto;
     background-color: #f4f7f9;
     font-family: 'Helvetica Neue', Arial, sans-serif;
     display: flex;

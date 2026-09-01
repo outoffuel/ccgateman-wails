@@ -6,7 +6,8 @@
     SaveUser, 
     DeleteUser, 
     GetRecentLogs, 
-    GetCurrentInsideUsers 
+    GetCurrentInsideUsers,
+    ToggleFullscreen
   } from '../../../wailsjs/go/main/App.js';
   import AdvancedOpsModal from './AdvancedOpsModal.svelte';
 
@@ -170,6 +171,14 @@
     </div>
 
     <div class="flex items-center gap-3">
+      <button 
+        on:click={async () => { await ToggleFullscreen(); }}
+        class="bg-slate-800 hover:bg-slate-700 text-slate-300 px-3.5 py-2 rounded-xl text-xs font-semibold transition flex items-center gap-1"
+        title="フルスクリーン表示のON/OFF"
+      >
+        🖥️ フルスクリーン切替
+      </button>
+
       <button 
         on:click={() => isAdvancedOpen = true}
         class="bg-rose-950/60 hover:bg-rose-900 text-rose-300 border border-rose-800/80 px-4 py-2 rounded-xl font-bold text-xs transition flex items-center gap-1.5"

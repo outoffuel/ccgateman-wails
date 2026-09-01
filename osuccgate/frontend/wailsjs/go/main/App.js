@@ -53,3 +53,7 @@ export function ImportUsersCSV() {
 export function ImportLogsCSV() {
   return window['go']['main']['App']['ImportLogsCSV']();
 }
+
+export function ToggleFullscreen() {
+  return window['go']['main']['App']['ToggleFullscreen']();
+}

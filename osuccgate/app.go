@@ -236,3 +236,16 @@ func (a *App) ImportLogsCSV() (string, error) {
 
 	return fmt.Sprintf("入退室ログCSVのインポートが完了しました（%d 件インポート / 対象 %d 件）", imported, total), nil
 }
+
+// ToggleFullscreen フルスクリーン表示の切り替え
+func (a *App) ToggleFullscreen() bool {
+	if a.ctx == nil {
+		return false
+	}
+	if runtime.WindowIsFullscreen(a.ctx) {
+		runtime.WindowUnfullscreen(a.ctx)
+		return false
+	}
+	runtime.WindowFullscreen(a.ctx)
+	return true
+}
