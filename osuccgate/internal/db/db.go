@@ -685,6 +685,157 @@ func (m *DBManager) GetFiscalYearLogs(fiscalYear int) ([]AccessLog, error) {
 	return logs, nil
 }
 
+// MonthlyStatRow 月別統計行データ
+type MonthlyStatRow struct {
+	YearMonth                 string `json:"yearMonth"`                 // "2026-09"
+	RoleOtherCount            int    `json:"roleOtherCount"`            // "-" (区分未設定 / その他)
+	Role0Count                int    `json:"role0Count"`                // "0（教職員）"
+	Role1Count                int    `json:"role1Count"`                // "1（学生）"
+	Role9Count                int    `json:"role9Count"`                // "9（スタッフ）"
+	MonthlyTotal              int    `json:"monthlyTotal"`              // 当月合計
+	FiscalYear                int    `json:"fiscalYear"`                // 2026 (年度)
+	FiscalYearCumulativeTotal int    `json:"fiscalYearCumulativeTotal"` // 当月までの合計 (4月〜当月累計)
+	QuarterPeriod             string `json:"quarterPeriod"`             // 四半期ラベル ("4月～6月", "7月～9月", "10月～12月", "1月～3月")
+	QuarterTotal              int    `json:"quarterTotal"`              // 当該四半期合計
+}
+
+// MonthlyStatsResponse 月別統計レスポンス
+type MonthlyStatsResponse struct {
+	Rows []MonthlyStatRow `json:"rows"`
+}
+
+// GetMonthlyStats 月別・区分別打刻統計データの取得
+func (m *DBManager) GetMonthlyStats() (*MonthlyStatsResponse, error) {
+	m.mu.RLock()
+	defer m.mu.RUnlock()
+
+	query := `
+	SELECT 
+		substr(l.timestamp, 1, 7) AS ym,
+		COALESCE(u.role_code, -1) AS role_code,
+		COUNT(*) AS cnt
+	FROM access_logs l
+	LEFT JOIN registered_users u ON l.card_id = u.card_id
+	WHERE l.event_type = 'entry'
+	GROUP BY ym, role_code
+	ORDER BY ym ASC
+	`
+	rows, err := m.db.Query(query)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+
+	type monthGroup struct {
+		yearMonth string
+		roleOther int
+		role0     int
+		role1     int
+		role9     int
+	}
+
+	monthMap := make(map[string]*monthGroup)
+	var orderedYM []string
+
+	for rows.Next() {
+		var ym string
+		var roleCode, cnt int
+		if err := rows.Scan(&ym, &roleCode, &cnt); err != nil {
+			return nil, err
+		}
+		if ym == "" {
+			continue
+		}
+		mg, exists := monthMap[ym]
+		if !exists {
+			mg = &monthGroup{yearMonth: ym}
+			monthMap[ym] = mg
+			orderedYM = append(orderedYM, ym)
+		}
+		switch roleCode {
+		case 0:
+			mg.role0 += cnt
+		case 1:
+			mg.role1 += cnt
+		case 9:
+			mg.role9 += cnt
+		default:
+			mg.roleOther += cnt
+		}
+	}
+
+	var resultRows []MonthlyStatRow
+	quarterTotals := make(map[string]int)
+
+	currentFiscalYear := -1
+	fyCumulative := 0
+
+	for _, ym := range orderedYM {
+		mg := monthMap[ym]
+		var year, month int
+		fmt.Sscanf(ym, "%d-%d", &year, &month)
+
+		fiscalYear := year
+		if month < 4 {
+			fiscalYear = year - 1
+		}
+
+		quarterPeriod := ""
+		if month >= 4 && month <= 6 {
+			quarterPeriod = "4月～6月"
+		} else if month >= 7 && month <= 9 {
+			quarterPeriod = "7月～9月"
+		} else if month >= 10 && month <= 12 {
+			quarterPeriod = "10月～12月"
+		} else {
+			quarterPeriod = "1月～3月"
+		}
+
+		if fiscalYear != currentFiscalYear {
+			currentFiscalYear = fiscalYear
+			fyCumulative = 0
+		}
+
+		monthlyTotal := mg.roleOther + mg.role0 + mg.role1 + mg.role9
+		fyCumulative += monthlyTotal
+
+		qKey := fmt.Sprintf("%d_%s", fiscalYear, quarterPeriod)
+		quarterTotals[qKey] += monthlyTotal
+
+		resultRows = append(resultRows, MonthlyStatRow{
+			YearMonth:                 ym,
+			RoleOtherCount:            mg.roleOther,
+			Role0Count:                mg.role0,
+			Role1Count:                mg.role1,
+			Role9Count:                mg.role9,
+			MonthlyTotal:              monthlyTotal,
+			FiscalYear:                fiscalYear,
+			FiscalYearCumulativeTotal: fyCumulative,
+			QuarterPeriod:             quarterPeriod,
+			QuarterTotal:              0, // 2パス目でセット
+		})
+	}
+
+	// 四半期合計の埋め込みと降順ソート
+	for i := range resultRows {
+		qKey := fmt.Sprintf("%d_%s", resultRows[i].FiscalYear, resultRows[i].QuarterPeriod)
+		resultRows[i].QuarterTotal = quarterTotals[qKey]
+	}
+
+	// 年月降順（新しい順）に反転
+	for i, j := 0, len(resultRows)-1; i < j; i, j = i+1, j-1 {
+		resultRows[i], resultRows[j] = resultRows[j], resultRows[i]
+	}
+
+	if resultRows == nil {
+		resultRows = []MonthlyStatRow{}
+	}
+
+	return &MonthlyStatsResponse{
+		Rows: resultRows,
+	}, nil
+}
+
 // FormatDuration 秒数を "X時間Y分" または "X分Y秒" に変換
 func FormatDuration(sec int64) string {
 	if sec < 60 {
@@ -705,3 +856,4 @@ func FormatDuration(sec int64) string {
 	}
 	return fmt.Sprintf("%d時間%d分", hours, remainingMin)
 }
+

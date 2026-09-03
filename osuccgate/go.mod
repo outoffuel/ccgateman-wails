@@ -4,7 +4,7 @@ go 1.25.0
 
 require (
 	github.com/ebfe/scard v0.0.0-20241214075232-7af069cabc25
-	github.com/wailsapp/wails/v2 v2.14.0
+	github.com/wailsapp/wails/v2 v2.15.0
 	golang.org/x/text v0.39.0
 	modernc.org/sqlite v1.57.0
 )

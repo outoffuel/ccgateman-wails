@@ -114,6 +114,12 @@ func (a *App) GetDashboardStats() (*db.DashboardStats, error) {
 	return a.dbManager.GetDashboardStats()
 }
 
+// GetMonthlyStats 月別統計データの取得
+func (a *App) GetMonthlyStats() (*db.MonthlyStatsResponse, error) {
+	return a.dbManager.GetMonthlyStats()
+}
+
+
 // GetAllUsers 登録ユーザー一覧の取得
 func (a *App) GetAllUsers() ([]db.RegisteredUser, error) {
 	return a.dbManager.GetAllUsers()

@@ -2,6 +2,7 @@
   import { onMount, onDestroy } from 'svelte';
   import { 
     GetDashboardStats, 
+    GetMonthlyStats,
     GetAllUsers, 
     SaveUser, 
     DeleteUser, 
@@ -13,11 +14,12 @@
 
   export let onBackToKiosk = () => {};
 
-  let activeTab = 'logs'; // 'logs' | 'inside' | 'users'
+  let activeTab = 'logs'; // 'logs' | 'inside' | 'users' | 'monthly'
   let stats = { currentInsideCount: 0, totalUserCount: 0, todayLogCount: 0 };
   let logs = [];
   let users = [];
   let insideUsers = [];
+  let monthlyStats = { rows: [] };
   let isAdvancedOpen = false;
 
   // 1. ソートステート
@@ -29,6 +31,9 @@
 
   let usersSortKey = 'roleCode';
   let usersSortDir = 'asc'; // デフォルト: 区分順
+
+  let monthlySortKey = 'yearMonth';
+  let monthlySortDir = 'desc'; // デフォルト: 年月の新しい順
 
   // 2. 列幅ステート (px)
   let logsWidths = {
@@ -62,6 +67,17 @@
     actions: 90
   };
 
+  let monthlyWidths = {
+    yearMonth: 130,
+    roleOther: 80,
+    role0: 130,
+    role1: 130,
+    role9: 130,
+    monthlyTotal: 100,
+    quarterTotal: 160,
+    fiscalYearCumulativeTotal: 160
+  };
+
   // リサイズドラッグハンドラー
   let isResizing = false;
   let activeResizeTable = null;
@@ -80,6 +96,7 @@
     if (table === 'logs') startWidth = logsWidths[colKey];
     else if (table === 'inside') startWidth = insideWidths[colKey];
     else if (table === 'users') startWidth = usersWidths[colKey];
+    else if (table === 'monthly') startWidth = monthlyWidths[colKey];
 
     window.addEventListener('mousemove', handleResizeMove);
     window.addEventListener('mouseup', handleResizeEnd);
@@ -96,6 +113,8 @@
       insideWidths = { ...insideWidths, [activeResizeCol]: newWidth };
     } else if (activeResizeTable === 'users') {
       usersWidths = { ...usersWidths, [activeResizeCol]: newWidth };
+    } else if (activeResizeTable === 'monthly') {
+      monthlyWidths = { ...monthlyWidths, [activeResizeCol]: newWidth };
     }
   }
 
@@ -158,6 +177,13 @@
         usersSortKey = key;
         usersSortDir = 'asc';
       }
+    } else if (tab === 'monthly') {
+      if (monthlySortKey === key) {
+        monthlySortDir = monthlySortDir === 'asc' ? 'desc' : 'asc';
+      } else {
+        monthlySortKey = key;
+        monthlySortDir = 'asc';
+      }
     }
   }
 
@@ -182,6 +208,8 @@
     }
   });
 
+  $: sortedMonthlyRows = sortData(monthlyStats?.rows || [], monthlySortKey, monthlySortDir);
+
   // ユーザー編集/登録用モーダルステート
   let isUserModalOpen = false;
   let editingUser = null;
@@ -201,16 +229,18 @@
 
   async function loadData() {
     try {
-      const [s, l, u, i] = await Promise.all([
+      const [s, l, u, i, m] = await Promise.all([
         GetDashboardStats(),
         GetRecentLogs(50),
         GetAllUsers(),
-        GetCurrentInsideUsers()
+        GetCurrentInsideUsers(),
+        GetMonthlyStats()
       ]);
       stats = s || { currentInsideCount: 0, totalUserCount: 0, todayLogCount: 0 };
       logs = l || [];
       users = u || [];
       insideUsers = i || [];
+      monthlyStats = m || { rows: [] };
     } catch (e) {
       console.error('Failed to load dashboard data:', e);
     }
@@ -431,6 +461,12 @@
           class={`px-5 py-2.5 rounded-2xl font-bold text-xs transition ${activeTab === 'users' ? 'bg-blue-600 text-white shadow-lg shadow-blue-600/30' : 'bg-slate-900 text-slate-400 hover:text-white border border-slate-800'}`}
         >
           👥 利用者マスター ({users.length})
+        </button>
+        <button 
+          on:click={() => activeTab = 'monthly'}
+          class={`px-5 py-2.5 rounded-2xl font-bold text-xs transition ${activeTab === 'monthly' ? 'bg-blue-600 text-white shadow-lg shadow-blue-600/30' : 'bg-slate-900 text-slate-400 hover:text-white border border-slate-800'}`}
+        >
+          📊 月別統計
         </button>
       </div>
 
@@ -879,6 +915,156 @@
                         編集
                       </button>
                     </td>
+                  </tr>
+                {/each}
+              </tbody>
+            </table>
+          </div>
+        {/if}
+      {/if}
+
+      <!-- 4. 月別統計 -->
+      {#if activeTab === 'monthly'}
+        {#if !monthlyStats.rows || monthlyStats.rows.length === 0}
+          <div class="text-center py-16 text-slate-500 text-sm">月別統計データはまだ集計されていません</div>
+        {:else}
+          <div class="overflow-x-auto">
+            <table class="text-left text-sm text-slate-300 border-collapse" style="table-layout: fixed; width: max-content; min-width: 100%;">
+              <colgroup>
+                <col style="width: {monthlyWidths.yearMonth}px;">
+                <col style="width: {monthlyWidths.roleOther}px;">
+                <col style="width: {monthlyWidths.role0}px;">
+                <col style="width: {monthlyWidths.role1}px;">
+                <col style="width: {monthlyWidths.role9}px;">
+                <col style="width: {monthlyWidths.monthlyTotal}px;">
+                <col style="width: {monthlyWidths.quarterTotal}px;">
+                <col style="width: {monthlyWidths.fiscalYearCumulativeTotal}px;">
+              </colgroup>
+              <thead class="text-xs text-slate-400 uppercase bg-slate-800/60 border-b border-slate-800 select-none">
+                <tr>
+                  <th 
+                    class="p-3.5 rounded-l-xl cursor-pointer hover:bg-slate-800/90 transition relative group"
+                    on:click={() => handleSort('monthly', 'yearMonth')}
+                  >
+                    <div class="flex items-center justify-between pr-2">
+                      <span>年月</span>
+                      <span class="text-xs font-mono {monthlySortKey === 'yearMonth' ? 'text-blue-400 font-bold' : 'text-slate-600 group-hover:text-slate-400'}">
+                        {monthlySortKey === 'yearMonth' ? (monthlySortDir === 'asc' ? '▲' : '▼') : '↕'}
+                      </span>
+                    </div>
+                    <div class="resizer" on:mousedown={(e) => startResize(e, 'monthly', 'yearMonth')} />
+                  </th>
+
+                  <th 
+                    class="p-3.5 text-center cursor-pointer hover:bg-slate-800/90 transition relative group"
+                    on:click={() => handleSort('monthly', 'roleOtherCount')}
+                  >
+                    <div class="flex items-center justify-center gap-1">
+                      <span>-</span>
+                      <span class="text-xs font-mono {monthlySortKey === 'roleOtherCount' ? 'text-blue-400 font-bold' : 'text-slate-600 group-hover:text-slate-400'}">
+                        {monthlySortKey === 'roleOtherCount' ? (monthlySortDir === 'asc' ? '▲' : '▼') : '↕'}
+                      </span>
+                    </div>
+                    <div class="resizer" on:mousedown={(e) => startResize(e, 'monthly', 'roleOther')} />
+                  </th>
+
+                  <th 
+                    class="p-3.5 text-center cursor-pointer hover:bg-slate-800/90 transition relative group"
+                    on:click={() => handleSort('monthly', 'role0Count')}
+                  >
+                    <div class="flex items-center justify-center gap-1">
+                      <span>0（教職員）</span>
+                      <span class="text-xs font-mono {monthlySortKey === 'role0Count' ? 'text-blue-400 font-bold' : 'text-slate-600 group-hover:text-slate-400'}">
+                        {monthlySortKey === 'role0Count' ? (monthlySortDir === 'asc' ? '▲' : '▼') : '↕'}
+                      </span>
+                    </div>
+                    <div class="resizer" on:mousedown={(e) => startResize(e, 'monthly', 'role0')} />
+                  </th>
+
+                  <th 
+                    class="p-3.5 text-center cursor-pointer hover:bg-slate-800/90 transition relative group"
+                    on:click={() => handleSort('monthly', 'role1Count')}
+                  >
+                    <div class="flex items-center justify-center gap-1">
+                      <span>1（学生）</span>
+                      <span class="text-xs font-mono {monthlySortKey === 'role1Count' ? 'text-blue-400 font-bold' : 'text-slate-600 group-hover:text-slate-400'}">
+                        {monthlySortKey === 'role1Count' ? (monthlySortDir === 'asc' ? '▲' : '▼') : '↕'}
+                      </span>
+                    </div>
+                    <div class="resizer" on:mousedown={(e) => startResize(e, 'monthly', 'role1')} />
+                  </th>
+
+                  <th 
+                    class="p-3.5 text-center cursor-pointer hover:bg-slate-800/90 transition relative group"
+                    on:click={() => handleSort('monthly', 'role9Count')}
+                  >
+                    <div class="flex items-center justify-center gap-1">
+                      <span>9（スタッフ）</span>
+                      <span class="text-xs font-mono {monthlySortKey === 'role9Count' ? 'text-blue-400 font-bold' : 'text-slate-600 group-hover:text-slate-400'}">
+                        {monthlySortKey === 'role9Count' ? (monthlySortDir === 'asc' ? '▲' : '▼') : '↕'}
+                      </span>
+                    </div>
+                    <div class="resizer" on:mousedown={(e) => startResize(e, 'monthly', 'role9')} />
+                  </th>
+
+                  <th 
+                    class="p-3.5 text-center bg-slate-800/40 cursor-pointer hover:bg-slate-800/90 transition relative group"
+                    on:click={() => handleSort('monthly', 'monthlyTotal')}
+                  >
+                    <div class="flex items-center justify-center gap-1">
+                      <span>月計</span>
+                      <span class="text-xs font-mono {monthlySortKey === 'monthlyTotal' ? 'text-blue-400 font-bold' : 'text-slate-600 group-hover:text-slate-400'}">
+                        {monthlySortKey === 'monthlyTotal' ? (monthlySortDir === 'asc' ? '▲' : '▼') : '↕'}
+                      </span>
+                    </div>
+                    <div class="resizer" on:mousedown={(e) => startResize(e, 'monthly', 'monthlyTotal')} />
+                  </th>
+
+                  <th 
+                    class="p-3.5 text-center cursor-pointer hover:bg-slate-800/90 transition relative group"
+                    on:click={() => handleSort('monthly', 'quarterTotal')}
+                  >
+                    <div class="flex items-center justify-between pr-2">
+                      <span>四半期</span>
+                      <span class="text-xs font-mono {monthlySortKey === 'quarterTotal' ? 'text-blue-400 font-bold' : 'text-slate-600 group-hover:text-slate-400'}">
+                        {monthlySortKey === 'quarterTotal' ? (monthlySortDir === 'asc' ? '▲' : '▼') : '↕'}
+                      </span>
+                    </div>
+                    <div class="resizer" on:mousedown={(e) => startResize(e, 'monthly', 'quarterTotal')} />
+                  </th>
+
+                  <th 
+                    class="p-3.5 text-right rounded-r-xl cursor-pointer hover:bg-slate-800/90 transition relative group"
+                    on:click={() => handleSort('monthly', 'fiscalYearCumulativeTotal')}
+                  >
+                    <div class="flex items-center justify-end gap-1">
+                      <span>当月までの合計</span>
+                      <span class="text-xs font-mono {monthlySortKey === 'fiscalYearCumulativeTotal' ? 'text-blue-400 font-bold' : 'text-slate-600 group-hover:text-slate-400'}">
+                        {monthlySortKey === 'fiscalYearCumulativeTotal' ? (monthlySortDir === 'asc' ? '▲' : '▼') : '↕'}
+                      </span>
+                    </div>
+                    <div class="resizer" on:mousedown={(e) => startResize(e, 'monthly', 'fiscalYearCumulativeTotal')} />
+                  </th>
+                </tr>
+              </thead>
+              <tbody class="divide-y divide-slate-800/60">
+                {#each sortedMonthlyRows as r}
+                  <tr class="hover:bg-slate-800/40 transition">
+                    <td class="p-3.5 font-mono font-bold text-white text-base truncate">{r.yearMonth}</td>
+                    <td class="p-3.5 text-center font-mono text-slate-400 truncate">{r.roleOtherCount || ''}</td>
+                    <td class="p-3.5 text-center font-mono font-semibold text-purple-300 truncate">{r.role0Count || ''}</td>
+                    <td class="p-3.5 text-center font-mono font-semibold text-blue-300 truncate">{r.role1Count || ''}</td>
+                    <td class="p-3.5 text-center font-mono font-semibold text-emerald-300 truncate">{r.role9Count || ''}</td>
+                    <td class="p-3.5 text-center font-mono font-bold text-white bg-slate-800/30 truncate">{r.monthlyTotal}</td>
+                    <td class="p-3.5 text-center truncate">
+                      {#if r.quarterPeriod}
+                        <div class="flex items-center justify-center gap-2">
+                          <span class="text-xs text-slate-400">{r.quarterPeriod}</span>
+                          <span class="font-mono font-bold text-slate-200">{r.quarterTotal}</span>
+                        </div>
+                      {/if}
+                    </td>
+                    <td class="p-3.5 text-right font-mono font-bold text-emerald-400 text-base truncate">{r.fiscalYearCumulativeTotal}</td>
                   </tr>
                 {/each}
               </tbody>

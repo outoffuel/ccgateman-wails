@@ -56,6 +56,7 @@ func (s *HTTPServer) Start() {
 	// APIルート
 	handleWithCORS("/api/auth/verify", s.handleVerifyPIN)
 	handleWithCORS("/api/stats", s.handleGetStats)
+	handleWithCORS("/api/stats/monthly", s.handleGetMonthlyStats)
 	handleWithCORS("/api/users", s.handleUsers)
 	handleWithCORS("/api/users/", s.handleUserByID)
 	handleWithCORS("/api/logs", s.handleLogs)
@@ -121,6 +122,17 @@ func (s *HTTPServer) handleGetStats(w http.ResponseWriter, r *http.Request) {
 	w.Header().Set("Content-Type", "application/json")
 	json.NewEncoder(w).Encode(stats)
 }
+
+func (s *HTTPServer) handleGetMonthlyStats(w http.ResponseWriter, r *http.Request) {
+	stats, err := s.dbManager.GetMonthlyStats()
+	if err != nil {
+		http.Error(w, err.Error(), http.StatusInternalServerError)
+		return
+	}
+	w.Header().Set("Content-Type", "application/json")
+	json.NewEncoder(w).Encode(stats)
+}
+
 
 func (s *HTTPServer) handleUsers(w http.ResponseWriter, r *http.Request) {
 	switch r.Method {
@@ -394,6 +406,7 @@ body { font-family: 'Noto Sans JP', 'Inter', sans-serif; background-color: #0f17
     let logs = [];
     let users = [];
     let insideUsers = [];
+    let monthlyStats = { rows: [] };
     let activeTab = 'logs';
 
     async function checkAuth() {
@@ -450,16 +463,18 @@ body { font-family: 'Noto Sans JP', 'Inter', sans-serif; background-color: #0f17
 
     async function loadAllData() {
       try {
-        const [statsRes, logsRes, usersRes, insideRes] = await Promise.all([
+        const [statsRes, logsRes, usersRes, insideRes, monthlyRes] = await Promise.all([
           fetch(API_BASE + '/api/stats'),
           fetch(API_BASE + '/api/logs?limit=50'),
           fetch(API_BASE + '/api/users'),
-          fetch(API_BASE + '/api/inside')
+          fetch(API_BASE + '/api/inside'),
+          fetch(API_BASE + '/api/stats/monthly')
         ]);
         stats = await statsRes.json();
         logs = await logsRes.json() || [];
         users = await usersRes.json() || [];
         insideUsers = await insideRes.json() || [];
+        monthlyStats = await monthlyRes.json() || { rows: [] };
         updateUI();
       } catch(e) {
         console.error(e);
@@ -508,6 +523,7 @@ body { font-family: 'Noto Sans JP', 'Inter', sans-serif; background-color: #0f17
               <button onclick="setTab('logs')" id="tab-logs" class="px-4 py-2 rounded-lg font-medium text-sm transition bg-blue-600 text-white">入退室ログ</button>
               <button onclick="setTab('inside')" id="tab-inside" class="px-4 py-2 rounded-lg font-medium text-sm transition bg-slate-800 text-slate-400 hover:text-white">在室中リスト</button>
               <button onclick="setTab('users')" id="tab-users" class="px-4 py-2 rounded-lg font-medium text-sm transition bg-slate-800 text-slate-400 hover:text-white">利用者マスター</button>
+              <button onclick="setTab('monthly')" id="tab-monthly" class="px-4 py-2 rounded-lg font-medium text-sm transition bg-slate-800 text-slate-400 hover:text-white">月別統計</button>
             </div>
             <div id="tabActions"></div>
           </div>
@@ -521,7 +537,7 @@ body { font-family: 'Noto Sans JP', 'Inter', sans-serif; background-color: #0f17
 
     function setTab(tab) {
       activeTab = tab;
-      ['logs', 'inside', 'users'].forEach(t => {
+      ['logs', 'inside', 'users', 'monthly'].forEach(t => {
         const btn = document.getElementById('tab-' + t);
         if (btn) {
           if (t === tab) {
@@ -666,8 +682,46 @@ body { font-family: 'Noto Sans JP', 'Inter', sans-serif; background-color: #0f17
             </tbody>
           </table>
         ` + "`" + `;
+      } else if (activeTab === 'monthly') {
+        actions.innerHTML = ` + "`" + `<span class="text-xs text-slate-500">月別・区分別打刻集計</span>` + "`" + `;
+        const mRows = (monthlyStats && monthlyStats.rows) ? monthlyStats.rows : [];
+        if (!mRows.length) {
+          content.innerHTML = '<div class="text-center py-12 text-slate-500">月別統計データはまだありません</div>';
+          return;
+        }
+        content.innerHTML = ` + "`" + `
+          <table class="w-full text-left text-sm text-slate-300 border-collapse">
+            <thead class="text-xs text-slate-400 uppercase bg-slate-800/50 select-none">
+              <tr>
+                <th class="p-3 border-b border-slate-700">年月</th>
+                <th class="p-3 text-center border-b border-slate-700">-</th>
+                <th class="p-3 text-center border-b border-slate-700">0（教職員）</th>
+                <th class="p-3 text-center border-b border-slate-700">1（学生）</th>
+                <th class="p-3 text-center border-b border-slate-700">9（スタッフ）</th>
+                <th class="p-3 text-center border-b border-slate-700 bg-slate-800/30">月計</th>
+                <th class="p-3 text-center border-b border-slate-700">四半期</th>
+                <th class="p-3 text-right border-b border-slate-700">当月までの合計</th>
+              </tr>
+            </thead>
+            <tbody class="divide-y divide-slate-800">
+              ${mRows.map(r => ` + "`" + `
+                <tr class="hover:bg-slate-800/30">
+                  <td class="p-3 font-mono font-bold text-white">${r.yearMonth}</td>
+                  <td class="p-3 text-center font-mono">${r.roleOtherCount || ''}</td>
+                  <td class="p-3 text-center font-mono font-semibold text-purple-300">${r.role0Count || ''}</td>
+                  <td class="p-3 text-center font-mono font-semibold text-blue-300">${r.role1Count || ''}</td>
+                  <td class="p-3 text-center font-mono font-semibold text-emerald-300">${r.role9Count || ''}</td>
+                  <td class="p-3 text-center font-mono font-bold text-white bg-slate-800/40">${r.monthlyTotal}</td>
+                  <td class="p-3 text-center"><span class="px-2 py-0.5 rounded text-xs bg-slate-800 text-slate-400">${r.quarterPeriod || ''} (${r.quarterTotal})</span></td>
+                  <td class="p-3 text-right font-mono font-bold text-emerald-400">${r.fiscalYearCumulativeTotal}</td>
+                </tr>
+              ` + "`" + `).join('')}
+            </tbody>
+          </table>
+        ` + "`" + `;
       }
     }
+
 
     function openUserModal(user = null) {
       const modal = document.getElementById("modalContainer");
