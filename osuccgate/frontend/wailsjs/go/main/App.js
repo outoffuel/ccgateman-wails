@@ -14,10 +14,6 @@ export function GetDashboardStats() {
   return window['go']['main']['App']['GetDashboardStats']();
 }
 
-export function GetMonthlyStats() {
-  return window['go']['main']['App']['GetMonthlyStats']();
-}
-
 export function GetAllUsers() {
   return window['go']['main']['App']['GetAllUsers']();
 }

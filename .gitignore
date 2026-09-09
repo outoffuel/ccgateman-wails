@@ -40,4 +40,3 @@ go.work
 
 # User added manualy
 *.db
-**/build/bin/
