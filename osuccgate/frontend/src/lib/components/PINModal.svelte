@@ -48,7 +48,7 @@
     </div>
     
     <h2 class="text-2xl font-bold text-white mb-2">管理者認証</h2>
-    <p class="text-slate-400 text-sm mb-6">4桁の管理者PINコードを入力してください (初期値: 1234)</p>
+    <p class="text-slate-400 text-sm mb-6">4桁の管理者PINコードを入力してください</p>
 
     {#if errorMessage}
       <div class="bg-rose-950/60 border border-rose-800 text-rose-300 text-xs py-2 px-3 rounded-xl mb-4">

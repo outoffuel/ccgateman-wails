@@ -28,7 +28,7 @@ type App struct {
 // NewApp creates a new App application struct
 func NewApp() *App {
 	return &App{
-		adminPin: "1234", // 管理者PINコード
+		adminPin: "8202", 
 	}
 }
 

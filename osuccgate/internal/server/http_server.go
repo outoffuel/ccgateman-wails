@@ -24,7 +24,7 @@ type HTTPServer struct {
 
 func NewHTTPServer(dbMgr *db.DBManager, gateSvc *service.GateService, port int, pin string) *HTTPServer {
 	if pin == "" {
-		pin = "1234" // デフォルト管理者PIN
+		pin = "8202"
 	}
 	if port <= 0 {
 		port = 8080
