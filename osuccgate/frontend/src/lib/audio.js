@@ -1,7 +1,15 @@
-// Web Audio API によるシンセサイズ効果音ジェネレータ
-// 外部音声ファイル不要で動作
+// Half-Life 効果音ジェネレータ / プレイヤー
+// エラー音: otkaz-v-dostupe (アクセス拒否音)
+// 通過音: knopka-iz-igry-2 (ボタン・通過音)
+
+import errorSoundUrl from '../assets/sounds/error.mp3';
+import passSoundUrl from '../assets/sounds/pass.mp3';
 
 let audioCtx = null;
+const audioBuffers = {
+  error: null,
+  pass: null,
+};
 
 function getAudioContext() {
   if (!audioCtx) {
@@ -16,95 +24,123 @@ function getAudioContext() {
   return audioCtx;
 }
 
-/**
- * 周波数とタイミングを指定してトーンを生成
- */
-function playTone(freq, type, duration, startTime = 0, gainLevel = 0.15) {
+// 音声ファイルを AudioBuffer としてデコードしてキャッシュ
+async function loadAudioBuffer(url) {
   const ctx = getAudioContext();
-  if (!ctx) return;
+  if (!ctx) return null;
+  try {
+    const response = await fetch(url);
+    const arrayBuffer = await response.arrayBuffer();
+    return await ctx.decodeAudioData(arrayBuffer);
+  } catch (e) {
+    console.warn('AudioContext decode failed:', e);
+    return null;
+  }
+}
 
-  const osc = ctx.createOscillator();
-  const gain = ctx.createGain();
+// 初回ロード時にプリロードを試行
+if (typeof window !== 'undefined') {
+  // バックグラウンドでデコードキャッシュを準備
+  setTimeout(() => {
+    loadAudioBuffer(passSoundUrl).then((buf) => {
+      if (buf) audioBuffers.pass = buf;
+    });
+    loadAudioBuffer(errorSoundUrl).then((buf) => {
+      if (buf) audioBuffers.error = buf;
+    });
+  }, 100);
+}
 
-  osc.type = type;
-  osc.frequency.setValueAtTime(freq, ctx.currentTime + startTime);
+function playAudioBufferOrFallback(type) {
+  const ctx = getAudioContext();
+  const url = type === 'error' ? errorSoundUrl : passSoundUrl;
 
-  gain.gain.setValueAtTime(gainLevel, ctx.currentTime + startTime);
-  gain.gain.exponentialRampToValueAtTime(0.0001, ctx.currentTime + startTime + duration);
+  if (ctx) {
+    if (audioBuffers[type]) {
+      try {
+        const source = ctx.createBufferSource();
+        source.buffer = audioBuffers[type];
+        source.connect(ctx.destination);
+        source.start(0);
+        return;
+      } catch (e) {
+        console.warn('Buffer playback failed, fallback to Audio element:', e);
+      }
+    } else {
+      // キャッシュが無ければ非同期ロードしつつ、初回はAudioで鳴らす
+      loadAudioBuffer(url).then((buf) => {
+        if (buf) audioBuffers[type] = buf;
+      });
+      try {
+        const audio = new Audio(url);
+        audio.play().catch((e) => console.warn('Audio element play error:', e));
+        return;
+      } catch (err) {
+        console.warn('Audio element failed:', err);
+      }
+    }
+  }
 
-  osc.connect(gain);
-  gain.connect(ctx.destination);
-
-  osc.start(ctx.currentTime + startTime);
-  osc.stop(ctx.currentTime + startTime + duration);
+  // フォールバック
+  try {
+    const audio = new Audio(url);
+    audio.play().catch((e) => console.warn('Fallback audio failed:', e));
+  } catch (e) {
+    console.warn('Audio instantiation failed:', e);
+  }
 }
 
 export const sounds = {
-  // 学生入室: ポップで爽快な上昇メロディ (ド・ミ・ソ・高ド)
+  // 通過音 (Half-Life)
+  pass() {
+    playAudioBufferOrFallback('pass');
+  },
+
+  // エラー音 (Half-Life)
+  error() {
+    playAudioBufferOrFallback('error');
+  },
+
+  // 学生入室: 通過音
   studentEntry() {
-    const ctx = getAudioContext();
-    if (!ctx) return;
-    playTone(523.25, 'sine', 0.25, 0.00, 0.2); // C5
-    playTone(659.25, 'sine', 0.25, 0.10, 0.2); // E5
-    playTone(783.99, 'sine', 0.25, 0.20, 0.2); // G5
-    playTone(1046.50, 'sine', 0.45, 0.30, 0.25); // C6
+    this.pass();
   },
 
-  // 学生退室: 落ち着いた終了メロディ (高ド・ソ・ミ・ド)
+  // 学生退室: 通過音
   studentExit() {
-    const ctx = getAudioContext();
-    if (!ctx) return;
-    playTone(880.00, 'sine', 0.25, 0.00, 0.2); // A5
-    playTone(783.99, 'sine', 0.25, 0.12, 0.2); // G5
-    playTone(659.25, 'sine', 0.25, 0.24, 0.2); // E5
-    playTone(523.25, 'sine', 0.40, 0.36, 0.2); // C5
+    this.pass();
   },
 
-  // 教職員入室: 格式高い上品なコード
+  // 教職員入室: 通過音
   staffEntry() {
-    const ctx = getAudioContext();
-    if (!ctx) return;
-    playTone(587.33, 'triangle', 0.35, 0.00, 0.25); // D5
-    playTone(739.99, 'triangle', 0.35, 0.12, 0.25); // F#5
-    playTone(880.00, 'triangle', 0.35, 0.24, 0.25); // A5
-    playTone(1174.66, 'sine', 0.55, 0.36, 0.30);    // D6
+    this.pass();
   },
 
-  // 教職員退室: 穏やかな低音コード
+  // 教職員退室: 通過音
   staffExit() {
-    const ctx = getAudioContext();
-    if (!ctx) return;
-    playTone(783.99, 'triangle', 0.3, 0.00, 0.2); // G5
-    playTone(659.25, 'triangle', 0.3, 0.15, 0.2); // E5
-    playTone(440.00, 'triangle', 0.5, 0.30, 0.2); // A4
+    this.pass();
   },
 
-  // エラー/警告 (ブザー音: ブー・ブー)
+  // エラー/警告: エラー音
   booboo() {
-    const ctx = getAudioContext();
-    if (!ctx) return;
-    playTone(180, 'sawtooth', 0.20, 0.00, 0.3);
-    playTone(150, 'sawtooth', 0.30, 0.25, 0.3);
+    this.error();
   },
 
   // サウンドタイプ名に応じた再生ディスパッチャ
   play(soundType) {
     switch (soundType) {
       case 'studentEntry':
-        this.studentEntry();
-        break;
       case 'studentExit':
-        this.studentExit();
-        break;
       case 'staffEntry':
-        this.staffEntry();
-        break;
       case 'staffExit':
-        this.staffExit();
+      case 'pass':
+      case 'success':
+        this.pass();
         break;
       case 'booboo':
+      case 'error':
       default:
-        this.booboo();
+        this.error();
         break;
     }
   }

@@ -1,0 +1,1512 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>入退室管理システム - 管理者コンソール</title>
+  <!-- Tailwind CSS CDN (ビルド環境不要で即座に動作) -->
+  <script src="https://cdn.tailwindcss.com"></script>
+  <script>
+    tailwind.config = {
+      theme: {
+        extend: {
+          colors: {
+            brand: {
+              50: '#eff6ff',
+              100: '#dbeafe',
+              200: '#bfdbfe',
+              500: '#3b82f6',
+              600: '#2563eb',
+              700: '#1d4ed8',
+              800: '#1e40af',
+              900: '#1e3a8a',
+            }
+          }
+        }
+      }
+    }
+  </script>
+  <style>
+    @import url('https://fonts.googleapis.com/css2?family=Noto+Sans+JP:wght@400;500;600;700&display=swap');
+    body {
+      font-family: 'Noto Sans JP', -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+    }
+    /* 画面切り替えのスムーズなフェードイン */
+    .fade-in {
+      animation: fadeIn 0.2s ease-in-out forwards;
+    }
+    @keyframes fadeIn {
+      from { opacity: 0; transform: translateY(3px); }
+      to { opacity: 1; transform: translateY(0); }
+    }
+    /* グラフのバーホバー効果 */
+    .chart-bar {
+      transition: all 0.25s ease;
+    }
+    .chart-bar:hover {
+      opacity: 0.8;
+      cursor: pointer;
+    }
+    /* スクロールバーのカスタマイズ */
+    ::-webkit-scrollbar {
+      width: 6px;
+      height: 6px;
+    }
+    ::-webkit-scrollbar-track {
+      background: #f1f5f9;
+    }
+    ::-webkit-scrollbar-thumb {
+      background: #cbd5e1;
+      border-radius: 9999px;
+    }
+    ::-webkit-scrollbar-thumb:hover {
+      background: #94a3b8;
+    }
+  </style>
+</head>
+<body class="bg-slate-50 text-slate-800 antialiased h-screen flex overflow-hidden select-none">
+
+  <!-- ==============================================================
+       画面左側：固定サイドバー (濃紺背景)
+       ============================================================== -->
+  <aside class="w-64 bg-slate-900 text-slate-300 flex flex-col flex-shrink-0 z-20 border-r border-slate-800">
+    <!-- システムロゴ & 管理対象室 -->
+    <div class="h-16 flex items-center px-6 border-b border-slate-800 gap-3">
+      <div class="w-9 h-9 rounded-lg bg-blue-600 flex items-center justify-center text-white shadow-md flex-shrink-0">
+        <!-- ドア・セキュリティ アイコン -->
+        <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+          <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 15v2m-6 4h12a2 2 0 002-2v-6a2 2 0 00-2-2H6a2 2 0 00-2 2v6a2 2 0 002 2zm10-10V7a4 4 0 00-8 0v4h8z"/>
+        </svg>
+      </div>
+      <div class="overflow-hidden">
+        <h1 class="text-sm font-bold text-white tracking-wide truncate">入退室管理システム</h1>
+        <p class="text-[11px] text-blue-400 font-medium">対象室：研究室</p>
+      </div>
+    </div>
+
+    <!-- 管理対象室ミニバッジ（単一室であることを明示） -->
+    <div class="px-5 py-4">
+      <div class="bg-slate-800/80 border border-slate-700/60 rounded-xl p-3 flex items-center justify-between shadow-xs">
+        <div class="flex items-center gap-2">
+          <span id="sidebar-status-dot" class="w-2.5 h-2.5 rounded-full bg-emerald-400"></span>
+          <div>
+            <div class="text-xs font-bold text-white">研究室</div>
+            <div id="sidebar-status-text" class="text-[10px] text-emerald-400 font-medium">解錠中</div>
+          </div>
+        </div>
+        <span class="text-[11px] bg-slate-700/90 text-slate-300 px-2 py-0.5 rounded font-mono font-medium">定員 10</span>
+      </div>
+    </div>
+
+    <!-- サイドバーメニュー -->
+    <nav class="flex-1 px-3 space-y-1.5 overflow-y-auto">
+      <!-- 1. ダッシュボード -->
+      <button 
+        id="nav-dashboard" 
+        onclick="switchTab('dashboard')"
+        class="nav-btn w-full flex items-center gap-3 px-4 py-3 text-sm font-semibold rounded-xl transition-all duration-150 bg-blue-600 text-white shadow-sm"
+      >
+        <svg class="w-5 h-5 flex-shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+          <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 6a2 2 0 012-2h2a2 2 0 012 2v2a2 2 0 01-2 2H6a2 2 0 01-2-2V6zM14 6a2 2 0 012-2h2a2 2 0 012 2v2a2 2 0 01-2 2h-2a2 2 0 01-2-2V6zM4 16a2 2 0 012-2h2a2 2 0 012 2v2a2 2 0 01-2 2H6a2 2 0 01-2-2v-2zM14 16a2 2 0 012-2h2a2 2 0 012 2v2a2 2 0 01-2 2h-2a2 2 0 01-2-2v-2z"/>
+        </svg>
+        <span>ダッシュボード</span>
+      </button>
+
+      <!-- 2. 入退室履歴 -->
+      <button 
+        id="nav-logs" 
+        onclick="switchTab('logs')"
+        class="nav-btn w-full flex items-center gap-3 px-4 py-3 text-sm font-medium rounded-xl transition-all duration-150 text-slate-400 hover:text-white hover:bg-slate-800"
+      >
+        <svg class="w-5 h-5 flex-shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+          <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 8v4l3 3m6-3a9 9 0 11-18 0 9 9 0 0118 0z"/>
+        </svg>
+        <span>入退室履歴</span>
+      </button>
+
+      <!-- 3. ユーザー管理 -->
+      <button 
+        id="nav-users" 
+        onclick="switchTab('users')"
+        class="nav-btn w-full flex items-center gap-3 px-4 py-3 text-sm font-medium rounded-xl transition-all duration-150 text-slate-400 hover:text-white hover:bg-slate-800"
+      >
+        <svg class="w-5 h-5 flex-shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+          <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 4.354a4 4 0 110 5.292M15 21H3v-1a6 6 0 0112 0v1zm0 0h6v-1a6 6 0 00-9-5.197M13 7a4 4 0 11-8 0 4 4 0 018 0z"/>
+        </svg>
+        <span>ユーザー管理</span>
+      </button>
+    </nav>
+
+    <!-- サイドバー下部情報 -->
+    <div class="p-4 border-t border-slate-800 text-xs text-slate-400 flex flex-col gap-1.5 bg-slate-900/50">
+      <div class="flex justify-between items-center">
+        <span class="text-slate-400">システム状態</span>
+        <span class="text-emerald-400 font-semibold flex items-center gap-1.5">
+          <span class="w-1.5 h-1.5 rounded-full bg-emerald-400 animate-pulse"></span>
+          正常稼働中
+        </span>
+      </div>
+      <div class="text-[11px] text-slate-500">大学システム開発課題版</div>
+    </div>
+  </aside>
+
+  <!-- ==============================================================
+       メインコンテンツエリア
+       ============================================================== -->
+  <div class="flex-1 flex flex-col min-w-0 overflow-hidden bg-slate-50">
+
+    <!-- 上部共通ヘッダー -->
+    <header class="h-16 bg-white border-b border-slate-200 flex items-center justify-between px-8 flex-shrink-0 z-10 shadow-xs">
+      <!-- 画面タイトル / 対象室表示 -->
+      <div class="flex items-center gap-3">
+        <h2 id="page-title" class="text-lg font-bold text-slate-800">ダッシュボード</h2>
+        <span class="text-xs bg-blue-50 text-blue-700 px-3 py-1 rounded-full font-semibold border border-blue-100 flex items-center gap-1.5">
+          <svg class="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 21V5a2 2 0 00-2-2H7a2 2 0 00-2 2v16m14 0h2m-2 0h-5m-9 0H3m2 0h5M9 7h1m-1 4h1m4-4h1m-1 4h1m-5 10v-5a1 1 0 011-1h2a1 1 0 011 1v5m-4 0h4"/>
+          </svg>
+          対象室：研究室
+        </span>
+      </div>
+
+      <!-- 右側：現在日時 & 管理者表示 -->
+      <div class="flex items-center gap-6">
+        <!-- 時計表示 -->
+        <div class="hidden sm:flex items-center gap-2 text-xs text-slate-600 bg-slate-50 px-3.5 py-1.5 rounded-lg border border-slate-200">
+          <svg class="w-3.5 h-3.5 text-slate-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 8v4l3 3m6-3a9 9 0 11-18 0 9 9 0 0118 0z"/>
+          </svg>
+          <span id="current-clock" class="font-mono font-medium text-slate-700">2026/10/22(木) 14:30:00</span>
+        </div>
+
+        <!-- 管理者アイコン & 「管理者」表示 -->
+        <div class="flex items-center gap-3 pl-3 border-l border-slate-200">
+          <div class="w-9 h-9 rounded-full bg-blue-600 text-white flex items-center justify-center font-bold text-sm shadow-sm ring-2 ring-blue-100 flex-shrink-0">
+            <!-- 管理者アバターアイコン -->
+            <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+              <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M16 7a4 4 0 11-8 0 4 4 0 018 0zM12 14a7 7 0 00-7 7h14a7 7 0 00-7-7z"/>
+            </svg>
+          </div>
+          <div>
+            <div class="text-sm font-bold text-slate-800 leading-tight">管理者</div>
+            <div class="text-[11px] text-emerald-600 flex items-center gap-1 font-medium mt-0.5">
+              <span class="w-1.5 h-1.5 rounded-full bg-emerald-500"></span> ログイン中
+            </div>
+          </div>
+        </div>
+      </div>
+    </header>
+
+    <!-- メインスクロール領域 -->
+    <main class="flex-1 overflow-y-auto p-8 space-y-6">
+
+      <!-- ==============================================================
+           1. ダッシュボード画面
+           ============================================================== -->
+      <section id="view-dashboard" class="fade-in space-y-6">
+
+        <!-- 画面上部に4つのカードを横並びで表示 -->
+        <div class="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-5">
+          
+          <!-- カード1：現在の在室人数 -->
+          <div class="bg-white rounded-xl p-5 border border-slate-200/90 shadow-sm flex items-center justify-between hover:shadow-md transition">
+            <div>
+              <p class="text-xs font-bold text-slate-500 uppercase tracking-wider">現在の在室人数</p>
+              <div class="mt-2 flex items-baseline gap-1.5">
+                <span id="stat-inside" class="text-3xl font-extrabold text-slate-800">2</span>
+                <span class="text-sm text-slate-500 font-bold">人</span>
+              </div>
+              <p class="text-xs text-blue-600 font-medium mt-1">定員 10人 (利用率 20%)</p>
+            </div>
+            <div class="w-12 h-12 rounded-xl bg-blue-50 text-blue-600 flex items-center justify-center border border-blue-100 flex-shrink-0">
+              <svg class="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M17 20h5v-2a3 3 0 00-5.356-1.857M17 20H7m10 0v-2c0-.656-.126-1.283-.356-1.857M7 20H2v-2a3 3 0 015.356-1.857M7 20v-2c0-.656.126-1.283.356-1.857m0 0a5.002 5.002 0 019.288 0M15 7a3 3 0 11-6 0 3 3 0 016 0zm6 3a2 2 0 11-4 0 2 2 0 014 0zM7 10a2 2 0 11-4 0 2 2 0 014 0z"/>
+              </svg>
+            </div>
+          </div>
+
+          <!-- カード2：本日の入室 -->
+          <div class="bg-white rounded-xl p-5 border border-slate-200/90 shadow-sm flex items-center justify-between hover:shadow-md transition">
+            <div>
+              <p class="text-xs font-bold text-slate-500 uppercase tracking-wider">本日の入室</p>
+              <div class="mt-2 flex items-baseline gap-1.5">
+                <span id="stat-entry" class="text-3xl font-extrabold text-slate-800">12</span>
+                <span class="text-sm text-slate-500 font-bold">回</span>
+              </div>
+              <p class="text-xs text-emerald-600 font-medium mt-1">最終 14:22 (山田 太郎)</p>
+            </div>
+            <div class="w-12 h-12 rounded-xl bg-emerald-50 text-emerald-600 flex items-center justify-center border border-emerald-100 flex-shrink-0">
+              <svg class="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M11 16l-4-4m0 0l4-4m-4 4h14m-5 4v1a3 3 0 01-3 3H6a3 3 0 01-3-3V7a3 3 0 013-3h7a3 3 0 013 3v1"/>
+              </svg>
+            </div>
+          </div>
+
+          <!-- カード3：本日の退室 -->
+          <div class="bg-white rounded-xl p-5 border border-slate-200/90 shadow-sm flex items-center justify-between hover:shadow-md transition">
+            <div>
+              <p class="text-xs font-bold text-slate-500 uppercase tracking-wider">本日の退室</p>
+              <div class="mt-2 flex items-baseline gap-1.5">
+                <span id="stat-exit" class="text-3xl font-extrabold text-slate-800">10</span>
+                <span class="text-sm text-slate-500 font-bold">回</span>
+              </div>
+              <p class="text-xs text-slate-500 font-medium mt-1">最終 13:58 (鈴木 花子)</p>
+            </div>
+            <div class="w-12 h-12 rounded-xl bg-rose-50 text-rose-600 flex items-center justify-center border border-rose-100 flex-shrink-0">
+              <svg class="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M17 16l4-4m0 0l-4-4m4 4H7m6 4v1a3 3 0 01-3 3H6a3 3 0 01-3-3V7a3 3 0 013-3h4a3 3 0 013 3v1"/>
+              </svg>
+            </div>
+          </div>
+
+          <!-- カード4：認証失敗 -->
+          <div class="bg-white rounded-xl p-5 border border-slate-200/90 shadow-sm flex items-center justify-between hover:shadow-md transition">
+            <div>
+              <p class="text-xs font-bold text-slate-500 uppercase tracking-wider">認証失敗</p>
+              <div class="mt-2 flex items-baseline gap-1.5">
+                <span id="stat-failed" class="text-3xl font-extrabold text-rose-600">1</span>
+                <span class="text-sm text-slate-500 font-bold">件</span>
+              </div>
+              <p class="text-xs text-rose-500 font-medium mt-1">11:05 未登録カード</p>
+            </div>
+            <div class="w-12 h-12 rounded-xl bg-amber-50 text-amber-600 flex items-center justify-center border border-amber-100 flex-shrink-0">
+              <svg class="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-3L13.732 4c-.77-1.333-2.694-1.333-3.464 0L3.34 16c-.77 1.333.192 3 1.732 3z"/>
+              </svg>
+            </div>
+          </div>
+
+        </div>
+
+        <!-- その下に「対象室の状態」カードを配置 -->
+        <div class="bg-white rounded-xl border border-slate-200/90 shadow-sm p-6">
+          <div class="flex flex-col sm:flex-row sm:items-center justify-between gap-4 pb-5 border-b border-slate-100">
+            <div class="flex items-center gap-3">
+              <div class="w-10 h-10 rounded-lg bg-blue-50 text-blue-600 flex items-center justify-center border border-blue-100">
+                <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                  <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 21V5a2 2 0 00-2-2H7a2 2 0 00-2 2v16m14 0h2m-2 0h-5m-9 0H3m2 0h5M9 7h1m-1 4h1m4-4h1m-1 4h1m-5 10v-5a1 1 0 011-1h2a1 1 0 011 1v5m-4 0h4"/>
+                </svg>
+              </div>
+              <div>
+                <h3 class="text-base font-bold text-slate-800">対象室の状態</h3>
+                <p class="text-xs text-slate-500">管理対象室のリアルタイム施錠・在室情報</p>
+              </div>
+            </div>
+
+            <!-- 管理者が操作できる「施錠する」「解錠する」ボタン -->
+            <div class="flex items-center gap-2.5">
+              <span class="text-xs text-slate-500 font-semibold mr-1">遠隔操作:</span>
+              <button 
+                id="btn-lock" 
+                onclick="toggleDoor(true)" 
+                class="px-4 py-2 text-xs font-bold rounded-lg border border-slate-300 bg-white hover:bg-slate-50 text-slate-700 transition flex items-center gap-1.5 shadow-xs"
+              >
+                <svg class="w-4 h-4 text-slate-500" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                  <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 15v2m-6 4h12a2 2 0 002-2v-6a2 2 0 00-2-2H6a2 2 0 00-2 2v6a2 2 0 002 2zm10-10V7a4 4 0 00-8 0v4h8z"/>
+                </svg>
+                施錠する
+              </button>
+              <button 
+                id="btn-unlock" 
+                onclick="toggleDoor(false)" 
+                class="px-4 py-2 text-xs font-bold rounded-lg bg-emerald-600 hover:bg-emerald-700 text-white transition flex items-center gap-1.5 shadow-sm"
+              >
+                <svg class="w-4 h-4 text-emerald-100" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                  <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M8 11V7a4 4 0 118 0m-4 8v2m-6 4h12a2 2 0 002-2v-6a2 2 0 00-2-2H6a2 2 0 00-2 2v6a2 2 0 002 2z"/>
+                </svg>
+                解錠する
+              </button>
+            </div>
+          </div>
+
+          <!-- 表示内容グリッド：対象室 / ドア状態 / 現在の在室人数 / 定員 -->
+          <div class="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-6 pt-5">
+            <!-- 対象室 -->
+            <div>
+              <p class="text-xs font-bold text-slate-400">対象室</p>
+              <p class="text-lg font-bold text-slate-800 mt-1">研究室</p>
+              <p class="text-xs text-slate-500 mt-0.5">管理対象：1部屋のみ</p>
+            </div>
+
+            <!-- ドア状態 (色で分かりやすく：解錠中→緑、施錠中→グレーまたは赤) -->
+            <div>
+              <p class="text-xs font-bold text-slate-400">ドア状態</p>
+              <div class="mt-1 flex items-center gap-2">
+                <span id="door-status-badge" class="inline-flex items-center gap-1.5 px-3 py-1 rounded-full text-xs font-bold bg-emerald-100 text-emerald-800 border border-emerald-200">
+                  <span id="door-status-dot" class="w-2 h-2 rounded-full bg-emerald-500"></span>
+                  <span id="door-status-text">解錠中</span>
+                </span>
+              </div>
+              <p id="door-subtext" class="text-xs text-slate-400 mt-1">通常利用可能</p>
+            </div>
+
+            <!-- 現在の在室人数 -->
+            <div>
+              <p class="text-xs font-bold text-slate-400">現在の在室人数</p>
+              <p class="text-lg font-bold text-slate-800 mt-1">
+                <span id="room-inside-count">2</span> 人
+              </p>
+              <p class="text-xs text-slate-500 mt-0.5" id="room-inside-names">在室者: 山田 太郎, 佐藤 一郎</p>
+            </div>
+
+            <!-- 定員 -->
+            <div>
+              <p class="text-xs font-bold text-slate-400">定員</p>
+              <p class="text-lg font-bold text-slate-800 mt-1">10 人</p>
+              <div class="w-full bg-slate-100 rounded-full h-2 mt-2 overflow-hidden">
+                <div id="capacity-bar" class="bg-blue-600 h-2 rounded-full transition-all duration-300" style="width: 20%;"></div>
+              </div>
+            </div>
+          </div>
+        </div>
+
+        <!-- 2カラム構成：本日の入退室グラフ（中央） ＆ 最近の入退室履歴（右側） -->
+        <div class="grid grid-cols-1 lg:grid-cols-12 gap-6">
+
+          <!-- 本日の入退室グラフ (中央 7カラム) -->
+          <div class="lg:col-span-7 bg-white rounded-xl border border-slate-200/90 shadow-sm p-6 flex flex-col justify-between">
+            <div>
+              <div class="flex items-center justify-between pb-3 border-b border-slate-100">
+                <div>
+                  <h3 class="text-base font-bold text-slate-800">本日の入退室状況</h3>
+                  <p class="text-xs text-slate-500">時間帯ごとの入室・退室回数（2時間毎）</p>
+                </div>
+                <!-- 凡例 (青：入室、赤：退室) -->
+                <div class="flex items-center gap-4 text-xs font-semibold">
+                  <div class="flex items-center gap-1.5">
+                    <span class="w-3 h-3 rounded-xs bg-blue-500"></span>
+                    <span class="text-slate-600">青：入室</span>
+                  </div>
+                  <div class="flex items-center gap-1.5">
+                    <span class="w-3 h-3 rounded-xs bg-rose-500"></span>
+                    <span class="text-slate-600">赤：退室</span>
+                  </div>
+                </div>
+              </div>
+
+              <!-- SVG 棒グラフ -->
+              <div class="relative mt-6">
+                <svg id="hourly-chart" class="w-full h-64 overflow-visible" viewBox="0 0 520 220">
+                  <!-- 背景グリッド線 & Y軸ラベル (縦軸：回数) -->
+                  <g class="text-slate-400 text-[10px] font-mono">
+                    <line x1="40" y1="20" x2="500" y2="20" stroke="#f1f5f9" stroke-width="1" />
+                    <text x="32" y="24" text-anchor="end" fill="#94a3b8">8回</text>
+
+                    <line x1="40" y1="65" x2="500" y2="65" stroke="#f1f5f9" stroke-width="1" />
+                    <text x="32" y="69" text-anchor="end" fill="#94a3b8">6回</text>
+
+                    <line x1="40" y1="110" x2="500" y2="110" stroke="#f1f5f9" stroke-width="1" />
+                    <text x="32" y="114" text-anchor="end" fill="#94a3b8">4回</text>
+
+                    <line x1="40" y1="155" x2="500" y2="155" stroke="#f1f5f9" stroke-width="1" />
+                    <text x="32" y="159" text-anchor="end" fill="#94a3b8">2回</text>
+
+                    <line x1="40" y1="190" x2="500" y2="190" stroke="#cbd5e1" stroke-width="1.5" />
+                    <text x="32" y="194" text-anchor="end" fill="#94a3b8">0</text>
+                  </g>
+
+                  <!-- 棒グラフデータ (横軸：時間) -->
+                  <!-- 08:00 (入室: 2, 退室: 0) -->
+                  <g class="group">
+                    <rect class="chart-bar" x="65" y="145" width="16" height="45" rx="3" fill="#3b82f6" />
+                    <text x="73" y="140" text-anchor="middle" font-size="10" font-weight="bold" fill="#3b82f6">2</text>
+                    <rect class="chart-bar" x="85" y="190" width="16" height="0" rx="3" fill="#ef4444" />
+                    <text x="83" y="208" text-anchor="middle" font-size="11" fill="#64748b" font-weight="500">08:00</text>
+                    <title>08:00 - 入室: 2回 / 退室: 0回</title>
+                  </g>
+
+                  <!-- 10:00 (入室: 4, 退室: 1) -->
+                  <g class="group">
+                    <rect class="chart-bar" x="130" y="100" width="16" height="90" rx="3" fill="#3b82f6" />
+                    <text x="138" y="95" text-anchor="middle" font-size="10" font-weight="bold" fill="#3b82f6">4</text>
+                    <rect class="chart-bar" x="150" y="167.5" width="16" height="22.5" rx="3" fill="#ef4444" />
+                    <text x="158" y="162.5" text-anchor="middle" font-size="10" font-weight="bold" fill="#ef4444">1</text>
+                    <text x="148" y="208" text-anchor="middle" font-size="11" fill="#64748b" font-weight="500">10:00</text>
+                    <title>10:00 - 入室: 4回 / 退室: 1回</title>
+                  </g>
+
+                  <!-- 12:00 (入室: 1, 退室: 4) -->
+                  <g class="group">
+                    <rect class="chart-bar" x="195" y="167.5" width="16" height="22.5" rx="3" fill="#3b82f6" />
+                    <text x="203" y="162.5" text-anchor="middle" font-size="10" font-weight="bold" fill="#3b82f6">1</text>
+                    <rect class="chart-bar" x="215" y="100" width="16" height="90" rx="3" fill="#ef4444" />
+                    <text x="223" y="95" text-anchor="middle" font-size="10" font-weight="bold" fill="#ef4444">4</text>
+                    <text x="213" y="208" text-anchor="middle" font-size="11" fill="#64748b" font-weight="500">12:00</text>
+                    <title>12:00 - 入室: 1回 / 退室: 4回</title>
+                  </g>
+
+                  <!-- 14:00 (入室: 5, 退室: 4) -->
+                  <g class="group">
+                    <rect class="chart-bar" x="260" y="77.5" width="16" height="112.5" rx="3" fill="#3b82f6" />
+                    <text x="268" y="72.5" text-anchor="middle" font-size="10" font-weight="bold" fill="#3b82f6">5</text>
+                    <rect class="chart-bar" x="280" y="100" width="16" height="90" rx="3" fill="#ef4444" />
+                    <text x="288" y="95" text-anchor="middle" font-size="10" font-weight="bold" fill="#ef4444">4</text>
+                    <text x="278" y="208" text-anchor="middle" font-size="11" fill="#64748b" font-weight="500">14:00</text>
+                    <title>14:00 - 入室: 5回 / 退室: 4回</title>
+                  </g>
+
+                  <!-- 16:00 (入室: 0, 退室: 1) -->
+                  <g class="group">
+                    <rect class="chart-bar" x="325" y="190" width="16" height="0" rx="3" fill="#3b82f6" />
+                    <rect class="chart-bar" x="345" y="167.5" width="16" height="22.5" rx="3" fill="#ef4444" />
+                    <text x="353" y="162.5" text-anchor="middle" font-size="10" font-weight="bold" fill="#ef4444">1</text>
+                    <text x="343" y="208" text-anchor="middle" font-size="11" fill="#64748b" font-weight="500">16:00</text>
+                    <title>16:00 - 入室: 0回 / 退室: 1回</title>
+                  </g>
+
+                  <!-- 18:00 (入室: 0, 退室: 0) -->
+                  <g class="group">
+                    <rect class="chart-bar" x="390" y="190" width="16" height="0" rx="3" fill="#3b82f6" />
+                    <rect class="chart-bar" x="410" y="190" width="16" height="0" rx="3" fill="#ef4444" />
+                    <text x="408" y="208" text-anchor="middle" font-size="11" fill="#64748b" font-weight="500">18:00</text>
+                    <title>18:00 - 入室: 0回 / 退室: 0回</title>
+                  </g>
+
+                  <!-- 20:00 (入室: 0, 退室: 0) -->
+                  <g class="group">
+                    <rect class="chart-bar" x="455" y="190" width="16" height="0" rx="3" fill="#3b82f6" />
+                    <rect class="chart-bar" x="475" y="190" width="16" height="0" rx="3" fill="#ef4444" />
+                    <text x="473" y="208" text-anchor="middle" font-size="11" fill="#64748b" font-weight="500">20:00</text>
+                    <title>20:00 - 入室: 0回 / 退室: 0回</title>
+                  </g>
+                </svg>
+              </div>
+            </div>
+
+            <p class="text-[11px] text-slate-400 mt-2 text-right">※各棒にカーソルを合わせると詳細が表示されます</p>
+          </div>
+
+          <!-- 最近の入退室履歴 (ダッシュボード右側 5カラム) -->
+          <div class="lg:col-span-5 bg-white rounded-xl border border-slate-200/90 shadow-sm p-6 flex flex-col justify-between">
+            <div>
+              <div class="flex items-center justify-between pb-3 border-b border-slate-100">
+                <h3 class="text-base font-bold text-slate-800">最近の入退室履歴</h3>
+                <!-- 右上に「すべて見る」リンク -->
+                <button 
+                  onclick="switchTab('logs')" 
+                  class="text-xs text-blue-600 hover:text-blue-800 font-bold flex items-center gap-1 transition"
+                >
+                  すべて見る
+                  <svg class="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                    <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 5l7 7-7 7"/>
+                  </svg>
+                </button>
+              </div>
+
+              <!-- 最近の入退室履歴テーブル (時刻 / 氏名 / 入室・退室 / 認証結果) -->
+              <div class="overflow-x-auto mt-2">
+                <table class="w-full text-left text-xs">
+                  <thead>
+                    <tr class="text-slate-400 border-b border-slate-100 font-semibold">
+                      <th class="py-2.5">時刻</th>
+                      <th class="py-2.5">氏名</th>
+                      <th class="py-2.5 text-center">入室 / 退室</th>
+                      <th class="py-2.5 text-right">認証結果</th>
+                    </tr>
+                  </thead>
+                  <tbody class="divide-y divide-slate-100 font-medium">
+                    <!-- 例にあったデータ -->
+                    <!-- 14:22 山田 太郎 入室 成功 -->
+                    <tr class="hover:bg-slate-50 transition">
+                      <td class="py-2.5 text-slate-600 font-mono">14:22</td>
+                      <td class="py-2.5 text-slate-800 font-bold">山田 太郎</td>
+                      <td class="py-2.5 text-center">
+                        <span class="inline-block px-2.5 py-0.5 rounded text-[11px] font-bold bg-blue-100 text-blue-700">入室</span>
+                      </td>
+                      <td class="py-2.5 text-right">
+                        <span class="inline-block px-2.5 py-0.5 rounded text-[11px] font-bold bg-emerald-100 text-emerald-700">成功</span>
+                      </td>
+                    </tr>
+                    <!-- 13:58 鈴木 花子 退室 成功 -->
+                    <tr class="hover:bg-slate-50 transition">
+                      <td class="py-2.5 text-slate-600 font-mono">13:58</td>
+                      <td class="py-2.5 text-slate-800 font-bold">鈴木 花子</td>
+                      <td class="py-2.5 text-center">
+                        <span class="inline-block px-2.5 py-0.5 rounded text-[11px] font-bold bg-rose-100 text-rose-700">退室</span>
+                      </td>
+                      <td class="py-2.5 text-right">
+                        <span class="inline-block px-2.5 py-0.5 rounded text-[11px] font-bold bg-emerald-100 text-emerald-700">成功</span>
+                      </td>
+                    </tr>
+                    <!-- 13:41 佐藤 一郎 入室 成功 -->
+                    <tr class="hover:bg-slate-50 transition">
+                      <td class="py-2.5 text-slate-600 font-mono">13:41</td>
+                      <td class="py-2.5 text-slate-800 font-bold">佐藤 一郎</td>
+                      <td class="py-2.5 text-center">
+                        <span class="inline-block px-2.5 py-0.5 rounded text-[11px] font-bold bg-blue-100 text-blue-700">入室</span>
+                      </td>
+                      <td class="py-2.5 text-right">
+                        <span class="inline-block px-2.5 py-0.5 rounded text-[11px] font-bold bg-emerald-100 text-emerald-700">成功</span>
+                      </td>
+                    </tr>
+                    <!-- 12:30 高橋 美咲 退室 成功 -->
+                    <tr class="hover:bg-slate-50 transition">
+                      <td class="py-2.5 text-slate-600 font-mono">12:30</td>
+                      <td class="py-2.5 text-slate-800 font-bold">高橋 美咲</td>
+                      <td class="py-2.5 text-center">
+                        <span class="inline-block px-2.5 py-0.5 rounded text-[11px] font-bold bg-rose-100 text-rose-700">退室</span>
+                      </td>
+                      <td class="py-2.5 text-right">
+                        <span class="inline-block px-2.5 py-0.5 rounded text-[11px] font-bold bg-emerald-100 text-emerald-700">成功</span>
+                      </td>
+                    </tr>
+                    <!-- 11:05 田中 健二 入室 失敗 -->
+                    <tr class="hover:bg-slate-50 transition">
+                      <td class="py-2.5 text-slate-600 font-mono">11:05</td>
+                      <td class="py-2.5 text-slate-800 font-bold">田中 健二</td>
+                      <td class="py-2.5 text-center">
+                        <span class="inline-block px-2.5 py-0.5 rounded text-[11px] font-bold bg-blue-100 text-blue-700">入室</span>
+                      </td>
+                      <td class="py-2.5 text-right">
+                        <span class="inline-block px-2.5 py-0.5 rounded text-[11px] font-bold bg-rose-100 text-rose-700">失敗</span>
+                      </td>
+                    </tr>
+                  </tbody>
+                </table>
+              </div>
+            </div>
+
+            <div class="pt-3 border-t border-slate-100 text-center">
+              <button onclick="switchTab('logs')" class="text-xs text-slate-500 hover:text-blue-600 font-semibold transition">
+                すべての入退室履歴を確認する →
+              </button>
+            </div>
+          </div>
+
+        </div>
+
+      </section>
+
+
+      <!-- ==============================================================
+           2. 入退室履歴画面
+           ============================================================== -->
+      <section id="view-logs" class="hidden fade-in space-y-6">
+
+        <!-- 画面タイトル & CSV出力ボタン -->
+        <div class="flex flex-col sm:flex-row sm:items-center justify-between gap-4">
+          <div>
+            <h2 class="text-xl font-bold text-slate-800">入退室履歴</h2>
+            <p class="text-xs text-slate-500 mt-0.5">管理している研究室への入退室記録を一覧で確認・検索できます</p>
+          </div>
+          <!-- 右上：CSV出力ボタン -->
+          <button 
+            onclick="exportLogsCSV()" 
+            class="px-4 py-2 bg-emerald-600 hover:bg-emerald-700 text-white rounded-xl text-xs font-bold transition shadow-xs flex items-center justify-center gap-2"
+          >
+            <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+              <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 10v6m0 0l-3-3m3 3l3-3m2 8H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z"/>
+            </svg>
+            CSV出力
+          </button>
+        </div>
+
+        <!-- 上部：検索・絞り込みエリア -->
+        <div class="bg-white rounded-xl border border-slate-200/90 shadow-sm p-5">
+          <form id="filter-form" onsubmit="event.preventDefault(); applyLogFilters();" class="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-12 gap-4 items-end">
+            
+            <!-- 日付指定 (開始日 ～ 終了日) -->
+            <div class="lg:col-span-4">
+              <label class="block text-xs font-bold text-slate-600 mb-1.5">日付指定 (開始日 ～ 終了日)</label>
+              <div class="flex items-center gap-2">
+                <input 
+                  type="date" 
+                  id="filter-date-start" 
+                  value="2026-10-22"
+                  class="w-full text-xs px-3 py-2 border border-slate-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500/20 focus:border-blue-500"
+                />
+                <span class="text-slate-400 text-xs">～</span>
+                <input 
+                  type="date" 
+                  id="filter-date-end" 
+                  value="2026-10-22"
+                  class="w-full text-xs px-3 py-2 border border-slate-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500/20 focus:border-blue-500"
+                />
+              </div>
+            </div>
+
+            <!-- 種類 (すべて / 入室 / 退室) -->
+            <div class="lg:col-span-2">
+              <label class="block text-xs font-bold text-slate-600 mb-1.5">種類</label>
+              <select 
+                id="filter-type" 
+                class="w-full text-xs px-3 py-2 border border-slate-300 rounded-lg bg-white focus:outline-none focus:ring-2 focus:ring-blue-500/20 focus:border-blue-500"
+              >
+                <option value="all">すべて</option>
+                <option value="入室">入室</option>
+                <option value="退室">退室</option>
+              </select>
+            </div>
+
+            <!-- 認証結果 (すべて / 成功 / 失敗) -->
+            <div class="lg:col-span-2">
+              <label class="block text-xs font-bold text-slate-600 mb-1.5">認証結果</label>
+              <select 
+                id="filter-result" 
+                class="w-full text-xs px-3 py-2 border border-slate-300 rounded-lg bg-white focus:outline-none focus:ring-2 focus:ring-blue-500/20 focus:border-blue-500"
+              >
+                <option value="all">すべて</option>
+                <option value="成功">成功</option>
+                <option value="失敗">失敗</option>
+              </select>
+            </div>
+
+            <!-- 検索 (氏名またはID) -->
+            <div class="lg:col-span-2">
+              <label class="block text-xs font-bold text-slate-600 mb-1.5">氏名またはID</label>
+              <input 
+                type="text" 
+                id="filter-keyword" 
+                placeholder="氏名・IDで検索" 
+                class="w-full text-xs px-3 py-2 border border-slate-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500/20 focus:border-blue-500"
+              />
+            </div>
+
+            <!-- ボタン (検索 / クリア) -->
+            <div class="lg:col-span-2 flex items-center gap-2">
+              <button 
+                type="submit" 
+                class="flex-1 py-2 bg-blue-600 hover:bg-blue-700 text-white rounded-lg text-xs font-bold transition shadow-xs flex items-center justify-center gap-1"
+              >
+                <svg class="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                  <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0z"/>
+                </svg>
+                検索
+              </button>
+              <button 
+                type="button" 
+                onclick="clearLogFilters()" 
+                class="px-3 py-2 border border-slate-300 bg-white hover:bg-slate-50 text-slate-700 rounded-lg text-xs font-semibold transition"
+              >
+                クリア
+              </button>
+            </div>
+
+          </form>
+        </div>
+
+        <!-- 履歴テーブル (日時 / 氏名 / ユーザーID / 種類 / 認証結果 / 備考) -->
+        <div class="bg-white rounded-xl border border-slate-200/90 shadow-sm overflow-hidden">
+          <div class="px-6 py-4 border-b border-slate-100 flex items-center justify-between bg-slate-50/50">
+            <span class="text-xs font-bold text-slate-600">
+              該当件数：<span id="log-count" class="font-extrabold text-slate-900">28</span> 件
+            </span>
+            <span class="text-xs text-slate-400">最新順</span>
+          </div>
+
+          <div class="overflow-x-auto">
+            <table class="w-full text-left text-xs">
+              <thead class="bg-slate-50 text-slate-500 font-bold uppercase tracking-wider border-b border-slate-200">
+                <tr>
+                  <th class="px-6 py-3.5">日時</th>
+                  <th class="px-6 py-3.5">氏名</th>
+                  <th class="px-6 py-3.5">ユーザーID</th>
+                  <th class="px-6 py-3.5 text-center">種類</th>
+                  <th class="px-6 py-3.5 text-center">認証結果</th>
+                  <th class="px-6 py-3.5">備考</th>
+                </tr>
+              </thead>
+              <tbody id="logs-table-body" class="divide-y divide-slate-100">
+                <!-- JavaScriptにて動的生成 -->
+              </tbody>
+            </table>
+          </div>
+
+          <!-- テーブル下部のページネーション (例：1 2 3 4 5 … 10) -->
+          <div class="px-6 py-4 border-t border-slate-100 flex items-center justify-between">
+            <div class="text-xs text-slate-500">
+              全 <span id="log-total-pages-count">28</span> 件中 
+              <span id="log-page-range">1 ～ 10</span> 件を表示
+            </div>
+            <div id="logs-pagination" class="flex items-center gap-1.5 text-xs">
+              <!-- ページ番号ボタン群 -->
+            </div>
+          </div>
+        </div>
+
+      </section>
+
+
+      <!-- ==============================================================
+           3. ユーザー管理画面
+           ============================================================== -->
+      <section id="view-users" class="hidden fade-in space-y-6">
+
+        <!-- 画面タイトル & 右上に目立つ青色の「＋ 新規登録」ボタン -->
+        <div class="flex flex-col sm:flex-row sm:items-center justify-between gap-4">
+          <div>
+            <h2 class="text-xl font-bold text-slate-800">ユーザー管理</h2>
+            <p class="text-xs text-slate-500 mt-0.5">研究室の入室を許可するユーザーを管理します</p>
+          </div>
+          <!-- 右上：＋ 新規登録 ボタン -->
+          <button 
+            onclick="openUserModal()" 
+            class="px-5 py-2.5 bg-blue-600 hover:bg-blue-700 text-white rounded-xl text-xs font-bold transition shadow-sm flex items-center justify-center gap-1.5"
+          >
+            <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+              <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 6v6m0 0v6m0-6h6m-6 0H6"/>
+            </svg>
+            ＋ 新規登録
+          </button>
+        </div>
+
+        <!-- 上部：検索欄 (名前・ユーザーID) & 絞り込み (すべて / 有効 / 無効) -->
+        <div class="bg-white rounded-xl border border-slate-200/90 shadow-sm p-5 flex flex-col md:flex-row md:items-center justify-between gap-4">
+          
+          <!-- 名前・ユーザーID検索欄 -->
+          <div class="relative w-full md:w-80">
+            <span class="absolute inset-y-0 left-0 pl-3.5 flex items-center pointer-events-none text-slate-400">
+              <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0z"/>
+              </svg>
+            </span>
+            <input 
+              type="text" 
+              id="user-search-input" 
+              oninput="filterUsers()"
+              placeholder="氏名またはユーザーIDで検索..." 
+              class="w-full text-xs pl-9 pr-3.5 py-2 border border-slate-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500/20 focus:border-blue-500"
+            />
+          </div>
+
+          <!-- 絞り込み (すべて / 有効 / 無効) -->
+          <div class="flex items-center gap-2">
+            <span class="text-xs font-bold text-slate-500 mr-1">状態絞り込み:</span>
+            <div class="inline-flex rounded-lg bg-slate-100 p-0.5 border border-slate-200 text-xs font-medium">
+              <button 
+                id="user-filter-all" 
+                onclick="setUserFilter('all')" 
+                class="px-3.5 py-1.5 rounded-md bg-white text-blue-700 shadow-xs font-bold transition"
+              >
+                すべて
+              </button>
+              <button 
+                id="user-filter-active" 
+                onclick="setUserFilter('active')" 
+                class="px-3.5 py-1.5 rounded-md text-slate-600 hover:text-slate-900 transition"
+              >
+                有効
+              </button>
+              <button 
+                id="user-filter-inactive" 
+                onclick="setUserFilter('inactive')" 
+                class="px-3.5 py-1.5 rounded-md text-slate-600 hover:text-slate-900 transition"
+              >
+                無効
+              </button>
+            </div>
+          </div>
+
+        </div>
+
+        <!-- ユーザー一覧テーブル (氏名 / ユーザーID / 権限 / 状態 / 操作) -->
+        <div class="bg-white rounded-xl border border-slate-200/90 shadow-sm overflow-hidden">
+          <div class="px-6 py-4 border-b border-slate-100 flex items-center justify-between bg-slate-50/50">
+            <span class="text-xs font-bold text-slate-600">
+              登録ユーザー：<span id="user-count" class="font-extrabold text-slate-900">7</span> 名
+            </span>
+          </div>
+
+          <div class="overflow-x-auto">
+            <table class="w-full text-left text-xs">
+              <thead class="bg-slate-50 text-slate-500 font-bold uppercase tracking-wider border-b border-slate-200">
+                <tr>
+                  <th class="px-6 py-3.5">氏名</th>
+                  <th class="px-6 py-3.5">ユーザーID</th>
+                  <th class="px-6 py-3.5">権限</th>
+                  <th class="px-6 py-3.5 text-center">状態</th>
+                  <th class="px-6 py-3.5 text-right">操作</th>
+                </tr>
+              </thead>
+              <tbody id="users-table-body" class="divide-y divide-slate-100">
+                <!-- JavaScriptにて動的生成 -->
+              </tbody>
+            </table>
+          </div>
+        </div>
+
+      </section>
+
+    </main>
+  </div>
+
+  <!-- ==============================================================
+       ユーザー登録・編集 モーダルウィンドウ
+       ============================================================== -->
+  <div id="user-modal" class="fixed inset-0 z-50 flex items-center justify-center bg-slate-900/50 backdrop-blur-xs hidden">
+    <div class="bg-white rounded-2xl shadow-2xl border border-slate-200 w-full max-w-md mx-4 overflow-hidden fade-in">
+      
+      <!-- モーダルヘッダー -->
+      <div class="px-6 py-4 border-b border-slate-100 flex items-center justify-between bg-slate-50">
+        <h3 id="modal-title" class="text-base font-bold text-slate-800">新規ユーザー登録</h3>
+        <button onclick="closeUserModal()" class="text-slate-400 hover:text-slate-600 p-1 rounded-lg transition">
+          <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M6 18L18 6M6 6l12 12"/>
+          </svg>
+        </button>
+      </div>
+
+      <!-- 入力フォーム (氏名 / ユーザーID / 権限 / 有効・無効) -->
+      <form id="user-form" onsubmit="event.preventDefault(); saveUser();" class="p-6 space-y-4">
+        <input type="hidden" id="form-edit-id" value="">
+
+        <!-- 氏名 -->
+        <div>
+          <label class="block text-xs font-bold text-slate-700 mb-1">氏名 <span class="text-rose-500">*</span></label>
+          <input 
+            type="text" 
+            id="form-name" 
+            required 
+            placeholder="例: 山田 太郎" 
+            class="w-full text-xs px-3.5 py-2.5 border border-slate-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500/20 focus:border-blue-500"
+          />
+        </div>
+
+        <!-- ユーザーID -->
+        <div>
+          <label class="block text-xs font-bold text-slate-700 mb-1">ユーザーID <span class="text-rose-500">*</span></label>
+          <input 
+            type="text" 
+            id="form-uid" 
+            required 
+            placeholder="例: A0012345" 
+            class="w-full text-xs px-3.5 py-2.5 border border-slate-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500/20 focus:border-blue-500 uppercase font-mono"
+          />
+        </div>
+
+        <!-- 権限 (管理者 / 一般ユーザー) -->
+        <div>
+          <label class="block text-xs font-bold text-slate-700 mb-1.5">権限</label>
+          <div class="grid grid-cols-2 gap-3">
+            <label class="flex items-center gap-2 p-2.5 border border-slate-200 rounded-lg cursor-pointer hover:bg-slate-50 transition">
+              <input type="radio" name="form-role" value="一般ユーザー" checked class="text-blue-600 focus:ring-blue-500">
+              <span class="text-xs font-semibold text-slate-700">一般ユーザー</span>
+            </label>
+            <label class="flex items-center gap-2 p-2.5 border border-slate-200 rounded-lg cursor-pointer hover:bg-slate-50 transition">
+              <input type="radio" name="form-role" value="管理者" class="text-blue-600 focus:ring-blue-500">
+              <span class="text-xs font-semibold text-slate-700">管理者</span>
+            </label>
+          </div>
+        </div>
+
+        <!-- 状態 (有効 / 無効) -->
+        <div>
+          <label class="block text-xs font-bold text-slate-700 mb-1.5">状態</label>
+          <div class="grid grid-cols-2 gap-3">
+            <label class="flex items-center gap-2 p-2.5 border border-slate-200 rounded-lg cursor-pointer hover:bg-slate-50 transition">
+              <input type="radio" name="form-status" value="有効" checked class="text-emerald-600 focus:ring-emerald-500">
+              <span class="text-xs font-bold text-emerald-700">有効</span>
+            </label>
+            <label class="flex items-center gap-2 p-2.5 border border-slate-200 rounded-lg cursor-pointer hover:bg-slate-50 transition">
+              <input type="radio" name="form-status" value="無効" class="text-rose-600 focus:ring-rose-500">
+              <span class="text-xs font-semibold text-slate-500">無効</span>
+            </label>
+          </div>
+        </div>
+
+        <!-- ボタン (キャンセル / 登録 or 保存) -->
+        <div class="pt-4 border-t border-slate-100 flex items-center justify-end gap-3">
+          <button 
+            type="button" 
+            onclick="closeUserModal()" 
+            class="px-4 py-2 border border-slate-300 text-slate-700 rounded-lg text-xs font-semibold hover:bg-slate-50 transition"
+          >
+            キャンセル
+          </button>
+          <button 
+            type="submit" 
+            id="form-submit-btn" 
+            class="px-5 py-2 bg-blue-600 hover:bg-blue-700 text-white rounded-lg text-xs font-bold transition shadow-sm"
+          >
+            登録
+          </button>
+        </div>
+      </form>
+    </div>
+  </div>
+
+  <!-- トースト通知コンテナ -->
+  <div id="toast-container" class="fixed top-5 right-5 z-50 flex flex-col gap-2 pointer-events-none"></div>
+
+  <!-- ==============================================================
+       アプリケーション JavaScript (データ＆ロジック)
+       ============================================================== -->
+  <script>
+    // ----------------------------------------------------------------
+    // 1. データ定義（大学課題としてわかりやすい構造）
+    // ----------------------------------------------------------------
+
+    // 対象室の状態（単一室）
+    let roomState = {
+      name: "研究室",
+      isLocked: false, // false: 解錠中, true: 施錠中
+      capacity: 10,
+      currentInside: 2,
+      insideUsers: ["山田 太郎", "佐藤 一郎"]
+    };
+
+    // ユーザー一覧ダミーデータ
+    let usersData = [
+      { id: 1, name: "山田 太郎", uid: "A0012345", role: "管理者", status: "有効" },
+      { id: 2, name: "鈴木 花子", uid: "A0023456", role: "一般ユーザー", status: "有効" },
+      { id: 3, name: "佐藤 一郎", uid: "A0034567", role: "一般ユーザー", status: "有効" },
+      { id: 4, name: "高橋 美咲", uid: "A0045678", role: "一般ユーザー", status: "有効" },
+      { id: 5, name: "田中 健二", uid: "A0056789", role: "一般ユーザー", status: "無効" },
+      { id: 6, name: "伊藤 翼",   uid: "A0067890", role: "一般ユーザー", status: "有効" },
+      { id: 7, name: "渡辺 拓海", uid: "A0078901", role: "管理者", status: "有効" }
+    ];
+
+    // 入退室履歴ダミーデータ（28件）
+    let logsData = [
+      { id: 1, timestamp: "2026/10/22 14:22", name: "山田 太郎", uid: "A0012345", type: "入室", result: "成功", note: "ICカード" },
+      { id: 2, timestamp: "2026/10/22 13:58", name: "鈴木 花子", uid: "A0023456", type: "退室", result: "成功", note: "顔認証" },
+      { id: 3, timestamp: "2026/10/22 13:41", name: "佐藤 一郎", uid: "A0034567", type: "入室", result: "成功", note: "ICカード" },
+      { id: 4, timestamp: "2026/10/22 12:30", name: "高橋 美咲", uid: "A0045678", type: "退室", result: "成功", note: "スマホ(NFC)" },
+      { id: 5, timestamp: "2026/10/22 11:05", name: "田中 健二", uid: "A0056789", type: "入室", result: "失敗", note: "未登録カード" },
+      { id: 6, timestamp: "2026/10/22 10:45", name: "鈴木 花子", uid: "A0023456", type: "入室", result: "成功", note: "顔認証" },
+      { id: 7, timestamp: "2026/10/22 10:15", name: "佐藤 一郎", uid: "A0034567", type: "退室", result: "成功", note: "ICカード" },
+      { id: 8, timestamp: "2026/10/22 09:40", name: "渡辺 拓海", uid: "A0078901", type: "入室", result: "成功", note: "暗証番号" },
+      { id: 9, timestamp: "2026/10/22 09:10", name: "高橋 美咲", uid: "A0045678", type: "入室", result: "成功", note: "スマホ(NFC)" },
+      { id: 10, timestamp: "2026/10/22 08:50", name: "伊藤 翼",   uid: "A0067890", type: "入室", result: "成功", note: "ICカード" },
+      { id: 11, timestamp: "2026/10/22 08:30", name: "山田 太郎", uid: "A0012345", type: "退室", result: "成功", note: "ICカード" },
+      { id: 12, timestamp: "2026/10/22 08:05", name: "山田 太郎", uid: "A0012345", type: "入室", result: "成功", note: "ICカード" },
+      { id: 13, timestamp: "2026/10/21 19:40", name: "佐藤 一郎", uid: "A0034567", type: "退室", result: "成功", note: "ICカード" },
+      { id: 14, timestamp: "2026/10/21 18:30", name: "鈴木 花子", uid: "A0023456", type: "退室", result: "成功", note: "顔認証" },
+      { id: 15, timestamp: "2026/10/21 17:15", name: "渡辺 拓海", uid: "A0078901", type: "退室", result: "成功", note: "暗証番号" },
+      { id: 16, timestamp: "2026/10/21 16:50", name: "伊藤 翼",   uid: "A0067890", type: "退室", result: "成功", note: "ICカード" },
+      { id: 17, timestamp: "2026/10/21 15:20", name: "高橋 美咲", uid: "A0045678", type: "入室", result: "成功", note: "スマホ(NFC)" },
+      { id: 18, timestamp: "2026/10/21 14:10", name: "田中 健二", uid: "A0056789", type: "入室", result: "失敗", note: "アカウント無効" },
+      { id: 19, timestamp: "2026/10/21 13:00", name: "山田 太郎", uid: "A0012345", type: "入室", result: "成功", note: "ICカード" },
+      { id: 20, timestamp: "2026/10/21 12:00", name: "鈴木 花子", uid: "A0023456", type: "入室", result: "成功", note: "顔認証" },
+      { id: 21, timestamp: "2026/10/21 11:30", name: "佐藤 一郎", uid: "A0034567", type: "入室", result: "成功", note: "ICカード" },
+      { id: 22, timestamp: "2026/10/21 10:10", name: "渡辺 拓海", uid: "A0078901", type: "入室", result: "成功", note: "暗証番号" },
+      { id: 23, timestamp: "2026/10/20 18:00", name: "山田 太郎", uid: "A0012345", type: "退室", result: "成功", note: "ICカード" },
+      { id: 24, timestamp: "2026/10/20 17:30", name: "鈴木 花子", uid: "A0023456", type: "退室", result: "成功", note: "顔認証" },
+      { id: 25, timestamp: "2026/10/20 16:20", name: "佐藤 一郎", uid: "A0034567", type: "退室", result: "成功", note: "ICカード" },
+      { id: 26, timestamp: "2026/10/20 14:00", name: "伊藤 翼",   uid: "A0067890", type: "入室", result: "成功", note: "ICカード" },
+      { id: 27, timestamp: "2026/10/20 10:30", name: "高橋 美咲", uid: "A0045678", type: "入室", result: "成功", note: "スマホ(NFC)" },
+      { id: 28, timestamp: "2026/10/20 09:00", name: "山田 太郎", uid: "A0012345", type: "入室", result: "成功", note: "ICカード" }
+    ];
+
+    // 履歴絞り込み結果
+    let filteredLogs = [...logsData];
+    let logCurrentPage = 1;
+    const LOGS_PER_PAGE = 10;
+
+    // ユーザー状態絞り込み
+    let currentUserStatusFilter = 'all';
+
+    // ----------------------------------------------------------------
+    // 2. 画面タブ切り替え
+    // ----------------------------------------------------------------
+    function switchTab(tabName) {
+      const tabs = {
+        'dashboard': { view: document.getElementById('view-dashboard'), nav: document.getElementById('nav-dashboard'), title: 'ダッシュボード' },
+        'logs': { view: document.getElementById('view-logs'), nav: document.getElementById('nav-logs'), title: '入退室履歴' },
+        'users': { view: document.getElementById('view-users'), nav: document.getElementById('nav-users'), title: 'ユーザー管理' }
+      };
+
+      Object.keys(tabs).forEach(key => {
+        const item = tabs[key];
+        if (key === tabName) {
+          item.view.classList.remove('hidden');
+          item.nav.className = "nav-btn w-full flex items-center gap-3 px-4 py-3 text-sm font-semibold rounded-xl transition-all duration-150 bg-blue-600 text-white shadow-sm";
+          document.getElementById('page-title').textContent = item.title;
+        } else {
+          item.view.classList.add('hidden');
+          item.nav.className = "nav-btn w-full flex items-center gap-3 px-4 py-3 text-sm font-medium rounded-xl transition-all duration-150 text-slate-400 hover:text-white hover:bg-slate-800";
+        }
+      });
+
+      if (tabName === 'logs') {
+        renderLogsTable();
+      } else if (tabName === 'users') {
+        renderUsersTable();
+      }
+    }
+
+    // ----------------------------------------------------------------
+    // 3. ドア施錠・解錠操作
+    // ----------------------------------------------------------------
+    function toggleDoor(toLocked) {
+      roomState.isLocked = toLocked;
+      const badge = document.getElementById('door-status-badge');
+      const dot = document.getElementById('door-status-dot');
+      const text = document.getElementById('door-status-text');
+      const sub = document.getElementById('door-subtext');
+      const sideDot = document.getElementById('sidebar-status-dot');
+      const sideText = document.getElementById('sidebar-status-text');
+
+      if (toLocked) {
+        // 施錠中：グレーまたは赤
+        badge.className = "inline-flex items-center gap-1.5 px-3 py-1 rounded-full text-xs font-bold bg-slate-100 text-slate-700 border border-slate-300";
+        dot.className = "w-2 h-2 rounded-full bg-slate-500";
+        text.textContent = "施錠中";
+        sub.textContent = "管理者操作により施錠されました";
+        
+        sideDot.className = "w-2.5 h-2.5 rounded-full bg-slate-400";
+        sideText.className = "text-[10px] text-slate-400 font-medium";
+        sideText.textContent = "施錠中";
+
+        showToast("研究室のドアを【施錠】しました", "info");
+      } else {
+        // 解錠中：緑
+        badge.className = "inline-flex items-center gap-1.5 px-3 py-1 rounded-full text-xs font-bold bg-emerald-100 text-emerald-800 border border-emerald-200";
+        dot.className = "w-2 h-2 rounded-full bg-emerald-500";
+        text.textContent = "解錠中";
+        sub.textContent = "通常利用可能";
+
+        sideDot.className = "w-2.5 h-2.5 rounded-full bg-emerald-400";
+        sideText.className = "text-[10px] text-emerald-400 font-medium";
+        sideText.textContent = "解錠中";
+
+        showToast("研究室のドアを【解錠】しました", "success");
+      }
+    }
+
+    // ----------------------------------------------------------------
+    // 4. 入退室履歴：検索・絞り込み・ページネーション・CSV出力
+    // ----------------------------------------------------------------
+    function applyLogFilters() {
+      const startDate = document.getElementById('filter-date-start').value;
+      const endDate = document.getElementById('filter-date-end').value;
+      const type = document.getElementById('filter-type').value;
+      const result = document.getElementById('filter-result').value;
+      const keyword = document.getElementById('filter-keyword').value.trim().toLowerCase();
+
+      filteredLogs = logsData.filter(log => {
+        // 日付比較
+        const logDate = log.timestamp.split(' ')[0].replace(/\//g, '-');
+        if (startDate && logDate < startDate) return false;
+        if (endDate && logDate > endDate) return false;
+
+        // 種類比較 (すべて / 入室 / 退室)
+        if (type !== 'all' && log.type !== type) return false;
+
+        // 認証結果比較 (すべて / 成功 / 失敗)
+        if (result !== 'all' && log.result !== result) return false;
+
+        // 氏名またはID検索
+        if (keyword) {
+          const matchName = log.name.toLowerCase().includes(keyword);
+          const matchUid = log.uid.toLowerCase().includes(keyword);
+          if (!matchName && !matchUid) return false;
+        }
+
+        return true;
+      });
+
+      logCurrentPage = 1;
+      renderLogsTable();
+      showToast(`${filteredLogs.length}件の履歴が見つかりました`, "info");
+    }
+
+    function clearLogFilters() {
+      document.getElementById('filter-date-start').value = "";
+      document.getElementById('filter-date-end').value = "";
+      document.getElementById('filter-type').value = "all";
+      document.getElementById('filter-result').value = "all";
+      document.getElementById('filter-keyword').value = "";
+      filteredLogs = [...logsData];
+      logCurrentPage = 1;
+      renderLogsTable();
+      showToast("検索条件をクリアしました", "info");
+    }
+
+    function renderLogsTable() {
+      const tbody = document.getElementById('logs-table-body');
+      const countEl = document.getElementById('log-count');
+      const totalPagesEl = document.getElementById('log-total-pages-count');
+      const rangeEl = document.getElementById('log-page-range');
+      const paginationEl = document.getElementById('logs-pagination');
+
+      countEl.textContent = filteredLogs.length;
+      totalPagesEl.textContent = filteredLogs.length;
+
+      if (filteredLogs.length === 0) {
+        tbody.innerHTML = `
+          <tr>
+            <td colspan="6" class="px-6 py-10 text-center text-slate-400 font-medium">
+              条件に一致する入退室履歴がありません。
+            </td>
+          </tr>
+        `;
+        rangeEl.textContent = "0";
+        paginationEl.innerHTML = '';
+        return;
+      }
+
+      const totalPages = Math.ceil(filteredLogs.length / LOGS_PER_PAGE);
+      if (logCurrentPage > totalPages) logCurrentPage = totalPages;
+      const startIndex = (logCurrentPage - 1) * LOGS_PER_PAGE;
+      const endIndex = Math.min(startIndex + LOGS_PER_PAGE, filteredLogs.length);
+      const pageLogs = filteredLogs.slice(startIndex, endIndex);
+
+      rangeEl.textContent = `${startIndex + 1} ～ ${endIndex}`;
+
+      tbody.innerHTML = pageLogs.map(log => {
+        // 入室は青色のラベル、退室は赤色のラベル
+        const typeBadge = log.type === '入室'
+          ? `<span class="inline-block px-2.5 py-0.5 rounded text-xs font-bold bg-blue-100 text-blue-700">入室</span>`
+          : `<span class="inline-block px-2.5 py-0.5 rounded text-xs font-bold bg-rose-100 text-rose-700">退室</span>`;
+
+        // 成功は緑色、失敗は赤色
+        const resultBadge = log.result === '成功'
+          ? `<span class="inline-block px-2.5 py-0.5 rounded text-xs font-bold bg-emerald-100 text-emerald-700">成功</span>`
+          : `<span class="inline-block px-2.5 py-0.5 rounded text-xs font-bold bg-rose-100 text-rose-700">失敗</span>`;
+
+        return `
+          <tr class="hover:bg-slate-50/80 transition border-b border-slate-100">
+            <td class="px-6 py-3.5 font-mono text-slate-600">${log.timestamp}</td>
+            <td class="px-6 py-3.5 font-bold text-slate-800">${log.name}</td>
+            <td class="px-6 py-3.5 font-mono text-slate-500">${log.uid}</td>
+            <td class="px-6 py-3.5 text-center">${typeBadge}</td>
+            <td class="px-6 py-3.5 text-center">${resultBadge}</td>
+            <td class="px-6 py-3.5 text-slate-500">${log.note}</td>
+          </tr>
+        `;
+      }).join('');
+
+      // ページネーションUI (例：1 2 3 4 5 … 10)
+      let paginationHtml = '';
+      if (totalPages > 1) {
+        // 前へ
+        paginationHtml += `
+          <button 
+            onclick="changeLogPage(${logCurrentPage - 1})" 
+            ${logCurrentPage === 1 ? 'disabled class="px-2.5 py-1 rounded border border-slate-200 text-slate-300 cursor-not-allowed"' : 'class="px-2.5 py-1 rounded border border-slate-300 hover:bg-slate-50 text-slate-700"'}
+          >前へ</button>
+        `;
+
+        for (let i = 1; i <= totalPages; i++) {
+          if (i === logCurrentPage) {
+            paginationHtml += `
+              <button class="px-3 py-1 rounded bg-blue-600 text-white font-bold">${i}</button>
+            `;
+          } else {
+            paginationHtml += `
+              <button onclick="changeLogPage(${i})" class="px-3 py-1 rounded border border-slate-200 hover:bg-slate-50 text-slate-700 font-medium">${i}</button>
+            `;
+          }
+        }
+
+        // 次へ
+        paginationHtml += `
+          <button 
+            onclick="changeLogPage(${logCurrentPage + 1})" 
+            ${logCurrentPage === totalPages ? 'disabled class="px-2.5 py-1 rounded border border-slate-200 text-slate-300 cursor-not-allowed"' : 'class="px-2.5 py-1 rounded border border-slate-200 text-slate-300 cursor-not-allowed"' : 'class="px-2.5 py-1 rounded border border-slate-300 hover:bg-slate-50 text-slate-700"'}
+          >次へ</button>
+        `;
+      }
+      paginationEl.innerHTML = paginationHtml;
+    }
+
+    function changeLogPage(page) {
+      const totalPages = Math.ceil(filteredLogs.length / LOGS_PER_PAGE);
+      if (page >= 1 && page <= totalPages) {
+        logCurrentPage = page;
+        renderLogsTable();
+      }
+    }
+
+    // CSV出力
+    function exportLogsCSV() {
+      if (filteredLogs.length === 0) {
+        showToast("出力対象の履歴がありません", "error");
+        return;
+      }
+      const header = ["日時", "氏名", "ユーザーID", "種類", "認証結果", "備考"];
+      const rows = filteredLogs.map(l => [
+        `"${l.timestamp}"`,
+        `"${l.name}"`,
+        `"${l.uid}"`,
+        `"${l.type}"`,
+        `"${l.result}"`,
+        `"${l.note}"`
+      ]);
+
+      const csvContent = "\uFEFF" + [header.join(","), ...rows.map(r => r.join(","))].join("\r\n");
+      const blob = new Blob([csvContent], { type: "text/csv;charset=utf-8;" });
+      const url = URL.createObjectURL(blob);
+      const link = document.createElement("a");
+      link.setAttribute("href", url);
+      link.setAttribute("download", `access_history_${new Date().toISOString().slice(0,10)}.csv`);
+      document.body.appendChild(link);
+      link.click();
+      document.body.removeChild(link);
+
+      showToast("CSVファイルを出力しました", "success");
+    }
+
+    // ----------------------------------------------------------------
+    // 5. ユーザー管理：検索・フィルタ・追加・編集・削除
+    // ----------------------------------------------------------------
+    function setUserFilter(filterType) {
+      currentUserStatusFilter = filterType;
+      const btnAll = document.getElementById('user-filter-all');
+      const btnActive = document.getElementById('user-filter-active');
+      const btnInactive = document.getElementById('user-filter-inactive');
+
+      [btnAll, btnActive, btnInactive].forEach(btn => {
+        btn.className = "px-3.5 py-1.5 rounded-md text-slate-600 hover:text-slate-900 transition";
+      });
+
+      if (filterType === 'all') {
+        btnAll.className = "px-3.5 py-1.5 rounded-md bg-white text-blue-700 shadow-xs font-bold transition";
+      } else if (filterType === 'active') {
+        btnActive.className = "px-3.5 py-1.5 rounded-md bg-white text-emerald-700 shadow-xs font-bold transition";
+      } else if (filterType === 'inactive') {
+        btnInactive.className = "px-3.5 py-1.5 rounded-md bg-white text-rose-700 shadow-xs font-bold transition";
+      }
+
+      renderUsersTable();
+    }
+
+    function filterUsers() {
+      renderUsersTable();
+    }
+
+    function renderUsersTable() {
+      const tbody = document.getElementById('users-table-body');
+      const countEl = document.getElementById('user-count');
+      const searchVal = document.getElementById('user-search-input').value.trim().toLowerCase();
+
+      const filtered = usersData.filter(user => {
+        // 状態絞り込み (すべて / 有効 / 無効)
+        if (currentUserStatusFilter === 'active' && user.status !== '有効') return false;
+        if (currentUserStatusFilter === 'inactive' && user.status !== '無効') return false;
+
+        // 名前・ID検索
+        if (searchVal) {
+          const matchName = user.name.toLowerCase().includes(searchVal);
+          const matchUid = user.uid.toLowerCase().includes(searchVal);
+          if (!matchName && !matchUid) return false;
+        }
+        return true;
+      });
+
+      countEl.textContent = filtered.length;
+
+      if (filtered.length === 0) {
+        tbody.innerHTML = `
+          <tr>
+            <td colspan="5" class="px-6 py-10 text-center text-slate-400 font-medium">
+              該当するユーザーが見つかりませんでした。
+            </td>
+          </tr>
+        `;
+        return;
+      }
+
+      tbody.innerHTML = filtered.map(user => {
+        // 権限：管理者 / 一般ユーザー
+        const roleBadge = user.role === '管理者'
+          ? `<span class="inline-block px-2.5 py-0.5 rounded text-xs font-bold bg-indigo-50 text-indigo-700 border border-indigo-200">管理者</span>`
+          : `<span class="inline-block px-2.5 py-0.5 rounded text-xs font-medium bg-slate-100 text-slate-700">一般ユーザー</span>`;
+
+        // 状態：有効は緑色、無効は赤またはグレー
+        const statusBadge = user.status === '有効'
+          ? `<span class="inline-flex items-center gap-1.5 px-2.5 py-0.5 rounded text-xs font-bold bg-emerald-50 text-emerald-700 border border-emerald-200">
+               <span class="w-1.5 h-1.5 rounded-full bg-emerald-500"></span> 有効
+             </span>`
+          : `<span class="inline-flex items-center gap-1.5 px-2.5 py-0.5 rounded text-xs font-medium bg-slate-100 text-slate-500">
+               <span class="w-1.5 h-1.5 rounded-full bg-slate-400"></span> 無効
+             </span>`;
+
+        return `
+          <tr class="hover:bg-slate-50/80 transition border-b border-slate-100">
+            <td class="px-6 py-3.5 font-bold text-slate-800">${user.name}</td>
+            <td class="px-6 py-3.5 font-mono text-slate-600">${user.uid}</td>
+            <td class="px-6 py-3.5">${roleBadge}</td>
+            <td class="px-6 py-3.5 text-center">${statusBadge}</td>
+            <td class="px-6 py-3.5 text-right space-x-2">
+              <button 
+                onclick="openEditUserModal(${user.id})" 
+                class="px-2.5 py-1 text-xs font-bold text-blue-600 hover:text-blue-800 hover:bg-blue-50 rounded transition"
+              >
+                編集
+              </button>
+              <button 
+                onclick="deleteUser(${user.id})" 
+                class="px-2.5 py-1 text-xs font-bold text-rose-600 hover:text-rose-800 hover:bg-rose-50 rounded transition"
+              >
+                削除
+              </button>
+            </td>
+          </tr>
+        `;
+      }).join('');
+    }
+
+    // モーダル操作：新規登録
+    function openUserModal() {
+      document.getElementById('modal-title').textContent = "新規ユーザー登録";
+      document.getElementById('form-submit-btn').textContent = "登録";
+      document.getElementById('form-edit-id').value = "";
+      document.getElementById('form-name').value = "";
+      document.getElementById('form-uid').value = "";
+      
+      const roleRadios = document.getElementsByName('form-role');
+      roleRadios[0].checked = true; // 一般ユーザー
+
+      const statusRadios = document.getElementsByName('form-status');
+      statusRadios[0].checked = true; // 有効
+
+      document.getElementById('user-modal').classList.remove('hidden');
+      document.getElementById('form-name').focus();
+    }
+
+    // モーダル操作：編集
+    function openEditUserModal(userId) {
+      const user = usersData.find(u => u.id === userId);
+      if (!user) return;
+
+      document.getElementById('modal-title').textContent = "ユーザー情報の編集";
+      document.getElementById('form-submit-btn').textContent = "保存";
+      document.getElementById('form-edit-id').value = user.id;
+      document.getElementById('form-name').value = user.name;
+      document.getElementById('form-uid').value = user.uid;
+
+      const roleRadios = document.getElementsByName('form-role');
+      for (const r of roleRadios) {
+        if (r.value === user.role) r.checked = true;
+      }
+
+      const statusRadios = document.getElementsByName('form-status');
+      for (const s of statusRadios) {
+        if (s.value === user.status) s.checked = true;
+      }
+
+      document.getElementById('user-modal').classList.remove('hidden');
+      document.getElementById('form-name').focus();
+    }
+
+    function closeUserModal() {
+      document.getElementById('user-modal').classList.add('hidden');
+    }
+
+    function saveUser() {
+      const editId = document.getElementById('form-edit-id').value;
+      const name = document.getElementById('form-name').value.trim();
+      const uid = document.getElementById('form-uid').value.trim().toUpperCase();
+
+      let role = '一般ユーザー';
+      const roleRadios = document.getElementsByName('form-role');
+      for (const r of roleRadios) {
+        if (r.checked) role = r.value;
+      }
+
+      let status = '有効';
+      const statusRadios = document.getElementsByName('form-status');
+      for (const s of statusRadios) {
+        if (s.checked) status = s.value;
+      }
+
+      if (!name || !uid) {
+        alert("氏名とユーザーIDを入力してください。");
+        return;
+      }
+
+      if (editId) {
+        // 編集保存
+        const user = usersData.find(u => u.id === parseInt(editId, 10));
+        if (user) {
+          user.name = name;
+          user.uid = uid;
+          user.role = role;
+          user.status = status;
+          showToast(`ユーザー「${name}」の情報を更新しました`, "success");
+        }
+      } else {
+        // 新規登録
+        const newId = usersData.length > 0 ? Math.max(...usersData.map(u => u.id)) + 1 : 1;
+        usersData.unshift({
+          id: newId,
+          name: name,
+          uid: uid,
+          role: role,
+          status: status
+        });
+        showToast(`ユーザー「${name}」を新規登録しました`, "success");
+      }
+
+      closeUserModal();
+      renderUsersTable();
+    }
+
+    function deleteUser(userId) {
+      const user = usersData.find(u => u.id === userId);
+      if (!user) return;
+
+      if (confirm(`ユーザー「${user.name} (${user.uid})」を削除してもよろしいですか？\nこの操作は取り消せません。`)) {
+        usersData = usersData.filter(u => u.id !== userId);
+        renderUsersTable();
+        showToast(`ユーザー「${user.name}」を削除しました`, "info");
+      }
+    }
+
+    // ----------------------------------------------------------------
+    // 6. トースト通知ヘルパー
+    // ----------------------------------------------------------------
+    function showToast(message, type = "info") {
+      const container = document.getElementById('toast-container');
+      const toast = document.createElement('div');
+      
+      let bgStyle = "bg-slate-800 text-white border-slate-700";
+      let iconSvg = `<svg class="w-4 h-4 text-blue-400" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M13 16h-1v-4h-1m1-4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z"/></svg>`;
+
+      if (type === "success") {
+        bgStyle = "bg-slate-900 text-white border-emerald-500/60 shadow-lg";
+        iconSvg = `<svg class="w-4 h-4 text-emerald-400" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M5 13l4 4L19 7"/></svg>`;
+      } else if (type === "error") {
+        bgStyle = "bg-rose-950 text-white border-rose-500/60 shadow-lg";
+        iconSvg = `<svg class="w-4 h-4 text-rose-300" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M6 18L18 6M6 6l12 12"/></svg>`;
+      }
+
+      toast.className = `flex items-center gap-2.5 px-4 py-3 rounded-xl border text-xs font-semibold shadow-md pointer-events-auto transition-all duration-300 transform translate-y-2 opacity-0 ${bgStyle}`;
+      toast.innerHTML = `${iconSvg}<span>${message}</span>`;
+
+      container.appendChild(toast);
+
+      requestAnimationFrame(() => {
+        toast.classList.remove('translate-y-2', 'opacity-0');
+      });
+
+      setTimeout(() => {
+        toast.classList.add('opacity-0', '-translate-y-2');
+        setTimeout(() => toast.remove(), 300);
+      }, 3000);
+    }
+
+    // ----------------------------------------------------------------
+    // 7. 現在日時のリアルタイム更新
+    // ----------------------------------------------------------------
+    function updateClock() {
+      const now = new Date();
+      const y = now.getFullYear();
+      const m = String(now.getMonth() + 1).padStart(2, '0');
+      const d = String(now.getDate()).padStart(2, '0');
+      const days = ['日', '月', '火', '水', '木', '金', '土'];
+      const day = days[now.getDay()];
+      const hh = String(now.getHours()).padStart(2, '0');
+      const mm = String(now.getMinutes()).padStart(2, '0');
+      const ss = String(now.getSeconds()).padStart(2, '0');
+
+      const el = document.getElementById('current-clock');
+      if (el) {
+        el.textContent = `${y}/${m}/${d}(${day}) ${hh}:${mm}:${ss}`;
+      }
+    }
+    setInterval(updateClock, 1000);
+    updateClock();
+
+    // ESCキーでモーダルを閉じる
+    window.addEventListener('keydown', (e) => {
+      if (e.key === 'Escape') closeUserModal();
+    });
+
+    // 初期テーブル描画
+    renderLogsTable();
+    renderUsersTable();
+  </script>
+</body>
+</html>
