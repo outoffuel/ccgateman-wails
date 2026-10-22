@@ -8,6 +8,7 @@ import (
 	"log"
 	"osuccgate/internal/db"
 	"osuccgate/internal/nfc"
+	"sort"
 	"strconv"
 	"strings"
 	"sync"
@@ -187,6 +188,7 @@ func (s *GateService) ProcessSwipe(rawCardID string) *SwipeResponse {
 }
 
 // GenerateFiscalYearCSV 指定年度のCSVバイト列を生成 (Excel対応 UTF-8 BOM付き)
+// フォーマット: 日時,ID,氏名,判定,区分,利用目的,入退室,滞在時間
 func (s *GateService) GenerateFiscalYearCSV(year int) ([]byte, error) {
 	logs, err := s.dbManager.GetFiscalYearLogs(year)
 	if err != nil {
@@ -198,34 +200,38 @@ func (s *GateService) GenerateFiscalYearCSV(year int) ([]byte, error) {
 	buf.Write([]byte{0xEF, 0xBB, 0xBF})
 
 	writer := csv.NewWriter(&buf)
-	// ヘッダー行 (入力種別・方法を明記)
-	headers := []string{"ログID", "打刻日時", "識別ID", "学籍番号/職員番号", "氏名", "区分", "入退室種別", "入力方法", "滞在時間(秒)", "滞在時間"}
+	// ヘッダー行: 日時,ID,氏名,判定,区分,利用目的,入退室,滞在時間
+	headers := []string{"日時", "ID", "氏名", "判定", "区分", "利用目的", "入退室", "滞在時間"}
 	if err := writer.Write(headers); err != nil {
 		return nil, err
 	}
 
 	for _, l := range logs {
 		eventTypeJa := "入室"
-		inputMethod := "カード読み取り"
-
 		if l.EventType == "exit" {
 			eventTypeJa = "退室"
-			inputMethod = "カード読み取り"
 		} else if l.EventType == "force_exit" {
 			eventTypeJa = "強制退室"
-			inputMethod = "システム自動 (23:00強制退室)"
+		}
+
+		resultStr := "成功"
+		if l.UserName == "" || l.UserName == "未登録" {
+			resultStr = "失敗"
+		}
+
+		userID := l.StudentNo
+		if userID == "" {
+			userID = l.CardID
 		}
 
 		row := []string{
-			fmt.Sprintf("%d", l.ID),
 			l.Timestamp.Format("2006-01-02 15:04:05"),
-			l.CardID,
-			l.StudentNo,
+			userID,
 			l.UserName,
+			resultStr,
 			l.RoleName,
+			l.Purpose,
 			eventTypeJa,
-			inputMethod,
-			fmt.Sprintf("%d", l.DurationSecond),
 			l.DurationText,
 		}
 		if err := writer.Write(row); err != nil {
@@ -514,14 +520,14 @@ func (s *GateService) ImportLogsCSV(csvData []byte) (int, int, error) {
 		if strings.Contains(cleaned, "日時") || strings.Contains(cleaned, "時刻") || strings.Contains(cleaned, "timestamp") || strings.Contains(cleaned, "date") || strings.Contains(cleaned, "time") {
 			headerMap["timestamp"] = colIdx
 			isHeader = true
-		} else if strings.Contains(cleaned, "識別") || strings.Contains(cleaned, "カード") || strings.Contains(cleaned, "学籍") || strings.Contains(cleaned, "学生番号") || cleaned == "cardid" || cleaned == "studentno" {
+		} else if cleaned == "id" || strings.Contains(cleaned, "識別") || strings.Contains(cleaned, "カード") || strings.Contains(cleaned, "学籍") || strings.Contains(cleaned, "学生番号") || cleaned == "cardid" || cleaned == "studentno" {
 			headerMap["card_id"] = colIdx
 			isHeader = true
-		} else if strings.Contains(cleaned, "種別") || strings.Contains(cleaned, "イベント") || strings.Contains(cleaned, "ステータス") || cleaned == "eventtype" || cleaned == "type" || cleaned == "status" {
+		} else if strings.Contains(cleaned, "入退室") || strings.Contains(cleaned, "種別") || strings.Contains(cleaned, "イベント") || strings.Contains(cleaned, "ステータス") || cleaned == "eventtype" || cleaned == "type" || cleaned == "status" {
 			headerMap["event_type"] = colIdx
 			isHeader = true
-		} else if strings.Contains(cleaned, "秒") || strings.Contains(cleaned, "duration") {
-			headerMap["duration_sec"] = colIdx
+		} else if strings.Contains(cleaned, "滞在時間") || strings.Contains(cleaned, "秒") || strings.Contains(cleaned, "duration") {
+			headerMap["duration"] = colIdx
 			isHeader = true
 		}
 	}
@@ -556,10 +562,10 @@ func (s *GateService) ImportLogsCSV(csvData []byte) (int, int, error) {
 			return ""
 		}
 
-		tsStr := getCol("timestamp", 1)
-		cardID := getCol("card_id", 2)
+		tsStr := getCol("timestamp", 0)
+		cardID := getCol("card_id", 1)
 		eventStr := getCol("event_type", 6)
-		durStr := getCol("duration_sec", 8)
+		durStr := getCol("duration", 7)
 
 		if tsStr == "" && cardID == "" {
 			continue
@@ -592,6 +598,9 @@ func (s *GateService) ImportLogsCSV(csvData []byte) (int, int, error) {
 		if durStr != "" {
 			if n, err := strconv.ParseInt(durStr, 10, 64); err == nil {
 				durSec = n
+			} else {
+				// "1時間23分" などのテキストから秒数を逆算
+				durSec = parseDurationStringToSeconds(durStr)
 			}
 		}
 
@@ -614,6 +623,101 @@ func (s *GateService) ImportLogsCSV(csvData []byte) (int, int, error) {
 		return 0, len(rows) - startIdx, fmt.Errorf("インポート可能なログデータが見つかりませんでした")
 	}
 
-	count, err := s.dbManager.ImportLogs(logs)
-	return count, len(logs), err
+	// ログを時系列順にソート
+	sort.Slice(logs, func(i, j int) bool {
+		return logs[i].Timestamp.Before(logs[j].Timestamp)
+	})
+
+	// 過去ログをインポートした場合、その日のうちに退室したものとして自動補完処理を行う
+	todayStr := time.Now().Format("2006-01-02")
+	type userDayState struct {
+		lastEvent string
+		lastTime  time.Time
+		lastDate  string
+	}
+	cardStates := make(map[string]userDayState)
+
+	var finalLogs []db.AccessLog
+	for _, l := range logs {
+		logDate := l.Timestamp.Format("2006-01-02")
+		state, exists := cardStates[l.CardID]
+
+		// 過去日において、前日のentryが未退室のまま次の日のログが来た場合、前日の23:00に自動強制退室を補完
+		if exists && state.lastEvent == "entry" && state.lastDate < logDate {
+			exitTime, _ := time.ParseInLocation("2006-01-02 15:04:05", state.lastDate+" 23:00:00", state.lastTime.Location())
+			if exitTime.Before(state.lastTime) {
+				exitTime, _ = time.ParseInLocation("2006-01-02 15:04:05", state.lastDate+" 23:59:59", state.lastTime.Location())
+			}
+			dur := int64(exitTime.Sub(state.lastTime).Seconds())
+			if dur < 0 {
+				dur = 0
+			}
+			finalLogs = append(finalLogs, db.AccessLog{
+				CardID:         l.CardID,
+				EventType:      "force_exit",
+				Timestamp:      exitTime,
+				DurationSecond: dur,
+			})
+			cardStates[l.CardID] = userDayState{lastEvent: "force_exit", lastTime: exitTime, lastDate: state.lastDate}
+		}
+
+		finalLogs = append(finalLogs, l)
+		cardStates[l.CardID] = userDayState{
+			lastEvent: l.EventType,
+			lastTime:  l.Timestamp,
+			lastDate:  logDate,
+		}
+	}
+
+	// 全ログ処理後、過去日（本日より前）でentryのまま終わっているカードがあれば同日23:00に自動退室を追加
+	for cardID, state := range cardStates {
+		if state.lastEvent == "entry" && state.lastDate < todayStr {
+			exitTime, _ := time.ParseInLocation("2006-01-02 15:04:05", state.lastDate+" 23:00:00", state.lastTime.Location())
+			if exitTime.Before(state.lastTime) {
+				exitTime, _ = time.ParseInLocation("2006-01-02 15:04:05", state.lastDate+" 23:59:59", state.lastTime.Location())
+			}
+			dur := int64(exitTime.Sub(state.lastTime).Seconds())
+			if dur < 0 {
+				dur = 0
+			}
+			finalLogs = append(finalLogs, db.AccessLog{
+				CardID:         cardID,
+				EventType:      "force_exit",
+				Timestamp:      exitTime,
+				DurationSecond: dur,
+			})
+		}
+	}
+
+	// 補完後の全ログを時系列で再ソート
+	sort.Slice(finalLogs, func(i, j int) bool {
+		return finalLogs[i].Timestamp.Before(finalLogs[j].Timestamp)
+	})
+
+	count, err := s.dbManager.ImportLogs(finalLogs)
+	return count, len(finalLogs), err
+}
+
+// parseDurationStringToSeconds "1時間23分" や "45分" "30秒" を秒数に変換
+func parseDurationStringToSeconds(s string) int64 {
+	s = strings.TrimSpace(s)
+	if s == "" || s == "-" {
+		return 0
+	}
+	var totalSec int64 = 0
+	if idx := strings.Index(s, "時間"); idx != -1 {
+		hours, _ := strconv.ParseInt(strings.TrimSpace(s[:idx]), 10, 64)
+		totalSec += hours * 3600
+		s = s[idx+len("時間"):]
+	}
+	if idx := strings.Index(s, "分"); idx != -1 {
+		mins, _ := strconv.ParseInt(strings.TrimSpace(s[:idx]), 10, 64)
+		totalSec += mins * 60
+		s = s[idx+len("分"):]
+	}
+	if idx := strings.Index(s, "秒"); idx != -1 {
+		secs, _ := strconv.ParseInt(strings.TrimSpace(s[:idx]), 10, 64)
+		totalSec += secs
+	}
+	return totalSec
 }

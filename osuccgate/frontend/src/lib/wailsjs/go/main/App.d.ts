@@ -17,6 +17,8 @@ export function GetCurrentInsideUsers():Promise<Array<db.UserStatus>>;
 
 export function GetDashboardStats():Promise<db.DashboardStats>;
 
+export function GetMonthlyStats():Promise<db.MonthlyStatsResponse>;
+
 export function GetRecentLogs(arg1:number):Promise<Array<db.AccessLog>>;
 
 export function ImportLogsCSV():Promise<string>;

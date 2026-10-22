@@ -98,15 +98,15 @@ func TestGateService_RoleCodesAndForceExit(t *testing.T) {
 		t.Errorf("Expected latest log eventType to be 'force_exit', got '%s'", recentLogs[0].EventType)
 	}
 
-	// CSVエクスポートで「システム自動」が出力されていることを確認
+	// CSVエクスポートで「強制退室」が出力されていることを確認
 	currentYear := time.Now().Year()
 	csvBytes, err := svc.GenerateFiscalYearCSV(currentYear)
 	if err != nil {
 		t.Fatalf("GenerateFiscalYearCSV failed: %v", err)
 	}
 	csvContent := string(csvBytes)
-	if !strings.Contains(csvContent, "強制退室") || !strings.Contains(csvContent, "システム自動") {
-		t.Errorf("CSV should contain '強制退室' and 'システム自動'")
+	if !strings.Contains(csvContent, "強制退室") || !strings.Contains(csvContent, "日時,ID,氏名,判定,区分,利用目的,入退室,滞在時間") {
+		t.Errorf("CSV should contain '強制退室' and correct headers: %s", csvContent)
 	}
 }
 

@@ -37,7 +37,8 @@ type AccessLog struct {
 	RoleName       string    `json:"roleName"`
 	RoleCode       int       `json:"roleCode"`
 	StudentNo      string    `json:"studentNo"`
-	EventType      string    `json:"eventType"` // "entry" (入室), "exit" (退室), "force_exit" (強制退室)
+	Purpose        string    `json:"purpose"`        // 利用目的
+	EventType      string    `json:"eventType"`      // "entry" (入室), "exit" (退室), "force_exit" (強制退室)
 	Timestamp      time.Time `json:"timestamp"`
 	DurationSecond int64     `json:"durationSecond"` // 退室・強制退室時に算出 (秒単位)
 	DurationText   string    `json:"durationText"`   // "1時間23分" 等
@@ -58,7 +59,29 @@ type UserStatus struct {
 type DashboardStats struct {
 	CurrentInsideCount int `json:"currentInsideCount"` // 現在の在室者数
 	TotalUserCount     int `json:"totalUserCount"`     // 登録総数
-	TodayLogCount      int `json:"todayLogCount"`      // 本日の総打刻数
+	TodayLogCount      int `json:"todayLogCount"`      // 本日の総入退室数
+	WeekLogCount       int `json:"weekLogCount"`       // 週間の入退室数 (直近7日間/今週)
+	MonthLogCount      int `json:"monthLogCount"`      // 月間の入退室数 (当月)
+	YearLogCount       int `json:"yearLogCount"`       // 年間の入退室数 (今年度/年間)
+}
+
+// MonthlyStatRow 月別・区分別打刻統計行データ (01prompt, 19prompt要件)
+type MonthlyStatRow struct {
+	YearMonth                 string `json:"yearMonth"`                 // "2026-09"
+	RoleOtherCount            int    `json:"roleOtherCount"`            // "-" (区分未設定 / その他)
+	Role0Count                int    `json:"role0Count"`                // "0（教職員）"
+	Role1Count                int    `json:"role1Count"`                // "1（学生）"
+	Role9Count                int    `json:"role9Count"`                // "9（スタッフ）"
+	MonthlyTotal              int    `json:"monthlyTotal"`              // 当月合計
+	FiscalYear                int    `json:"fiscalYear"`                // 2026 (年度)
+	FiscalYearCumulativeTotal int    `json:"fiscalYearCumulativeTotal"` // 当月までの合計 (年度累計)
+	QuarterPeriod             string `json:"quarterPeriod"`             // 四半期ラベル ("4月～6月", "7月～9月", "10月～12月", "1月～3月")
+	QuarterTotal              int    `json:"quarterTotal"`              // 当該四半期合計
+}
+
+// MonthlyStatsResponse 月別統計レスポンス
+type MonthlyStatsResponse struct {
+	Rows []MonthlyStatRow `json:"rows"`
 }
 
 type DBManager struct {
@@ -510,6 +533,7 @@ func (m *DBManager) GetRecentLogs(limit int) ([]AccessLog, error) {
 	query := `
 	SELECT 
 		l.id, l.card_id, u.name, u.role_name, u.role_code, u.student_no,
+		COALESCE(u.purpose, '') as purpose,
 		l.event_type, l.timestamp, l.duration_second
 	FROM access_logs l
 	LEFT JOIN registered_users u ON l.card_id = u.card_id
@@ -526,16 +550,17 @@ func (m *DBManager) GetRecentLogs(limit int) ([]AccessLog, error) {
 	for rows.Next() {
 		var l AccessLog
 		var tsStr string
-		var name, roleName, studentNo sql.NullString
+		var name, roleName, studentNo, purpose sql.NullString
 		var roleCode sql.NullInt64
 
-		if err := rows.Scan(&l.ID, &l.CardID, &name, &roleName, &roleCode, &studentNo, &l.EventType, &tsStr, &l.DurationSecond); err != nil {
+		if err := rows.Scan(&l.ID, &l.CardID, &name, &roleName, &roleCode, &studentNo, &purpose, &l.EventType, &tsStr, &l.DurationSecond); err != nil {
 			return nil, err
 		}
 		l.UserName = name.String
 		l.RoleName = roleName.String
 		l.RoleCode = int(roleCode.Int64)
 		l.StudentNo = studentNo.String
+		l.Purpose = purpose.String
 		l.Timestamp, _ = time.Parse(time.RFC3339, tsStr)
 		if l.Timestamp.IsZero() {
 			l.Timestamp, _ = time.Parse("2006-01-02 15:04:05", tsStr)
@@ -569,24 +594,179 @@ func (m *DBManager) GetDashboardStats() (*DashboardStats, error) {
 		_ = m.db.QueryRow("SELECT COUNT(*) FROM access_logs WHERE timestamp LIKE ?", todayDate+"%").Scan(&stats.TodayLogCount)
 	}
 
-	// 3. 現在の在室者数 (各カードの最新ログが 'entry' である件数)
+	// 3. 現在の在室者数 (本日00:00以降にentryし、最新ログが 'entry' である件数)
+	todayPrefix := time.Now().Format("2006-01-02")
 	queryInside := `
 	SELECT COUNT(*) FROM (
-		SELECT card_id, event_type FROM access_logs
-		WHERE id IN (
-			SELECT MAX(id) FROM access_logs GROUP BY card_id
-		) AND event_type = 'entry'
+		SELECT l.card_id, l.event_type FROM access_logs l
+		INNER JOIN (
+			SELECT card_id, MAX(id) as max_id FROM access_logs GROUP BY card_id
+		) latest ON l.id = latest.max_id
+		WHERE l.event_type = 'entry'
+		  AND (l.timestamp >= ? OR l.timestamp >= ? OR l.timestamp LIKE ?)
 	)
 	`
-	_ = m.db.QueryRow(queryInside).Scan(&stats.CurrentInsideCount)
+	_ = m.db.QueryRow(queryInside, todayStart, todayPrefix+" 00:00:00", todayPrefix+"%").Scan(&stats.CurrentInsideCount)
+
+	// 4. 週間の入退室数 (直近7日間)
+	sevenDaysAgo := time.Now().AddDate(0, 0, -6).Format("2006-01-02")
+	_ = m.db.QueryRow("SELECT COUNT(*) FROM access_logs WHERE timestamp >= ?", sevenDaysAgo).Scan(&stats.WeekLogCount)
+
+	// 5. 月間の入退室数 (当月1日以降)
+	monthStart := time.Now().Format("2006-01") + "-01"
+	_ = m.db.QueryRow("SELECT COUNT(*) FROM access_logs WHERE timestamp >= ?", monthStart).Scan(&stats.MonthLogCount)
+
+	// 6. 年間の入退室数 (今年度4月1日以降)
+	now := time.Now()
+	fyYear := now.Year()
+	if now.Month() < 4 {
+		fyYear--
+	}
+	fyStart := fmt.Sprintf("%d-04-01", fyYear)
+	_ = m.db.QueryRow("SELECT COUNT(*) FROM access_logs WHERE timestamp >= ?", fyStart).Scan(&stats.YearLogCount)
 
 	return stats, nil
 }
 
-// GetCurrentInsideUsers 現在在室中のユーザー一覧
+// GetMonthlyStats 月別・区分別打刻統計データの取得 (年月, -, 0教職員, 1学生, 9スタッフ, 当月までの合計)
+func (m *DBManager) GetMonthlyStats() (*MonthlyStatsResponse, error) {
+	m.mu.RLock()
+	defer m.mu.RUnlock()
+
+	query := `
+	SELECT 
+		substr(l.timestamp, 1, 7) AS ym,
+		COALESCE(u.role_code, -1) AS role_code,
+		COUNT(*) AS cnt
+	FROM access_logs l
+	LEFT JOIN registered_users u ON l.card_id = u.card_id
+	WHERE l.event_type = 'entry'
+	GROUP BY ym, role_code
+	ORDER BY ym ASC
+	`
+	rows, err := m.db.Query(query)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+
+	type monthGroup struct {
+		yearMonth string
+		roleOther int
+		role0     int
+		role1     int
+		role9     int
+	}
+
+	monthMap := make(map[string]*monthGroup)
+	var orderedYM []string
+
+	for rows.Next() {
+		var ym string
+		var roleCode, cnt int
+		if err := rows.Scan(&ym, &roleCode, &cnt); err != nil {
+			return nil, err
+		}
+		if ym == "" {
+			continue
+		}
+		mg, exists := monthMap[ym]
+		if !exists {
+			mg = &monthGroup{yearMonth: ym}
+			monthMap[ym] = mg
+			orderedYM = append(orderedYM, ym)
+		}
+		switch roleCode {
+		case 0:
+			mg.role0 += cnt
+		case 1:
+			mg.role1 += cnt
+		case 9:
+			mg.role9 += cnt
+		default:
+			mg.roleOther += cnt
+		}
+	}
+
+	var resultRows []MonthlyStatRow
+	quarterTotals := make(map[string]int)
+
+	currentFiscalYear := -1
+	fyCumulative := 0
+
+	for _, ym := range orderedYM {
+		mg := monthMap[ym]
+		var year, month int
+		fmt.Sscanf(ym, "%d-%d", &year, &month)
+
+		fiscalYear := year
+		if month < 4 {
+			fiscalYear = year - 1
+		}
+
+		quarterPeriod := ""
+		if month >= 4 && month <= 6 {
+			quarterPeriod = "4月～6月"
+		} else if month >= 7 && month <= 9 {
+			quarterPeriod = "7月～9月"
+		} else if month >= 10 && month <= 12 {
+			quarterPeriod = "10月～12月"
+		} else {
+			quarterPeriod = "1月～3月"
+		}
+
+		if fiscalYear != currentFiscalYear {
+			currentFiscalYear = fiscalYear
+			fyCumulative = 0
+		}
+
+		monthlyTotal := mg.roleOther + mg.role0 + mg.role1 + mg.role9
+		fyCumulative += monthlyTotal
+
+		qKey := fmt.Sprintf("%d_%s", fiscalYear, quarterPeriod)
+		quarterTotals[qKey] += monthlyTotal
+
+		resultRows = append(resultRows, MonthlyStatRow{
+			YearMonth:                 ym,
+			RoleOtherCount:            mg.roleOther,
+			Role0Count:                mg.role0,
+			Role1Count:                mg.role1,
+			Role9Count:                mg.role9,
+			MonthlyTotal:              monthlyTotal,
+			FiscalYear:                fiscalYear,
+			FiscalYearCumulativeTotal: fyCumulative,
+			QuarterPeriod:             quarterPeriod,
+			QuarterTotal:              0, // 2パス目で設定
+		})
+	}
+
+	// 四半期合計の反映
+	for i := range resultRows {
+		qKey := fmt.Sprintf("%d_%s", resultRows[i].FiscalYear, resultRows[i].QuarterPeriod)
+		resultRows[i].QuarterTotal = quarterTotals[qKey]
+	}
+
+	// 年月降順（新しい順）
+	for i, j := 0, len(resultRows)-1; i < j; i, j = i+1, j-1 {
+		resultRows[i], resultRows[j] = resultRows[j], resultRows[i]
+	}
+
+	if resultRows == nil {
+		resultRows = []MonthlyStatRow{}
+	}
+
+	return &MonthlyStatsResponse{
+		Rows: resultRows,
+	}, nil
+}
+
+// GetCurrentInsideUsers 現在在室中のユーザー一覧 (本日00:00以降にentryした利用者を対象)
 func (m *DBManager) GetCurrentInsideUsers() ([]UserStatus, error) {
 	m.mu.RLock()
 	defer m.mu.RUnlock()
+
+	todayPrefix := time.Now().Format("2006-01-02")
+	todayStart := todayPrefix + "T00:00:00"
 
 	query := `
 	SELECT 
@@ -597,9 +777,10 @@ func (m *DBManager) GetCurrentInsideUsers() ([]UserStatus, error) {
 	) latest ON l.id = latest.max_id
 	LEFT JOIN registered_users u ON l.card_id = u.card_id
 	WHERE l.event_type = 'entry'
+	  AND (l.timestamp >= ? OR l.timestamp >= ? OR l.timestamp LIKE ?)
 	ORDER BY l.timestamp DESC
 	`
-	rows, err := m.db.Query(query)
+	rows, err := m.db.Query(query, todayStart, todayPrefix+" 00:00:00", todayPrefix+"%")
 	if err != nil {
 		return nil, err
 	}
@@ -654,6 +835,7 @@ func (m *DBManager) GetFiscalYearLogs(fiscalYear int) ([]AccessLog, error) {
 		COALESCE(u.role_name, '未登録') as role_name,
 		COALESCE(u.role_code, 1) as role_code,
 		COALESCE(u.student_no, '') as student_no,
+		COALESCE(u.purpose, '') as purpose,
 		l.event_type, l.timestamp, l.duration_second
 	FROM access_logs l
 	LEFT JOIN registered_users u ON l.card_id = u.card_id
@@ -670,7 +852,7 @@ func (m *DBManager) GetFiscalYearLogs(fiscalYear int) ([]AccessLog, error) {
 	for rows.Next() {
 		var l AccessLog
 		var tsStr string
-		if err := rows.Scan(&l.ID, &l.CardID, &l.UserName, &l.RoleName, &l.RoleCode, &l.StudentNo, &l.EventType, &tsStr, &l.DurationSecond); err != nil {
+		if err := rows.Scan(&l.ID, &l.CardID, &l.UserName, &l.RoleName, &l.RoleCode, &l.StudentNo, &l.Purpose, &l.EventType, &tsStr, &l.DurationSecond); err != nil {
 			return nil, err
 		}
 		l.Timestamp, _ = time.Parse(time.RFC3339, tsStr)
