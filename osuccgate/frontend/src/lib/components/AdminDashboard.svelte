@@ -26,7 +26,7 @@
   let isAdvancedOpen = false;
   let refreshTimer = null;
 
-  // 定員設定 (単一室・研究室)
+  // 定員設定 (単一施設)
   const ROOM_CAPACITY = 10;
 
   // Wails利用可能フラグ
@@ -42,7 +42,7 @@
     { cardId: "A0045678", studentNo: "A0045678", name: "高橋 美咲", furigana: "タカハシ ミサキ", gender: "女", roleName: "学生", roleCode: 1, adminNo: "4", contact: "090-3456-7890", purpose: "修士研究" },
     { cardId: "A0056789", studentNo: "A0056789", name: "田中 健二", furigana: "タナカ ケンジ", gender: "男", roleName: "学生", roleCode: 1, adminNo: "5", contact: "kenji@example.com", purpose: "課題制作" },
     { cardId: "A0067890", studentNo: "A0067890", name: "伊藤 翼",   furigana: "イトウ ツバサ", gender: "男", roleName: "学生", roleCode: 1, adminNo: "6", contact: "080-4567-8901", purpose: "自習" },
-    { cardId: "A0078901", studentNo: "A0078901", name: "渡辺 拓海", furigana: "ワタナベ タクミ", gender: "男", roleName: "教職員", roleCode: 0, adminNo: "7", contact: "watanabe@example.com", purpose: "研究室管理" }
+    { cardId: "A0078901", studentNo: "A0078901", name: "渡辺 拓海", furigana: "ワタナベ タクミ", gender: "男", roleName: "教職員", roleCode: 0, adminNo: "7", contact: "watanabe@example.com", purpose: "施設管理" }
   ];
 
   const dummyLogs = [
@@ -714,7 +714,7 @@
           {activeTab === 'dashboard' ? 'ダッシュボード' : activeTab === 'logs' ? '入退室履歴' : activeTab === 'inside' ? '在室中メンバー' : 'ユーザー管理'}
         </h2>
         <span class="text-xs bg-blue-50 text-blue-700 px-3 py-1 rounded-full font-semibold border border-blue-100">
-          対象室：研究室
+          対象施設：クリエイトセンター
         </span>
       </div>
 
@@ -1059,7 +1059,7 @@
           <div class="flex flex-col sm:flex-row sm:items-center justify-between gap-4">
             <div>
               <h2 class="text-xl font-bold text-slate-800">入退室履歴</h2>
-              <p class="text-xs text-slate-500 mt-0.5">研究室へのすべての入退室ログを検索・一覧確認できます（列ヘッダーでソート・リサイズ可能）</p>
+              <p class="text-xs text-slate-500 mt-0.5">クリエイトセンターへのすべての入退室ログを検索・一覧確認できます（列ヘッダーでソート・リサイズ可能）</p>
             </div>
             <button 
               on:click={exportLogsCSV}
@@ -1276,7 +1276,7 @@
           <div class="flex flex-col sm:flex-row sm:items-center justify-between gap-4">
             <div>
               <h2 class="text-xl font-bold text-slate-800">在室中メンバー</h2>
-              <p class="text-xs text-slate-500 mt-0.5">現在研究室に在室している利用者のリアルタイム状況です（定員：{ROOM_CAPACITY}名）</p>
+              <p class="text-xs text-slate-500 mt-0.5">現在、施設内にいる利用者のリアルタイム状況です（定員：{ROOM_CAPACITY}名）</p>
             </div>
             <button 
               on:click={() => isAdvancedOpen = true}
@@ -1367,7 +1367,7 @@
           <div class="flex flex-col sm:flex-row sm:items-center justify-between gap-4">
             <div>
               <h2 class="text-xl font-bold text-slate-800">ユーザー管理</h2>
-              <p class="text-xs text-slate-500 mt-0.5">研究室の入室を許可する利用者を登録・管理します（列幅調整・ソート対応）</p>
+              <p class="text-xs text-slate-500 mt-0.5">クリエイトセンターへの入室を許可する利用者を登録・管理します（列幅調整・ソート対応）</p>
             </div>
             <!-- 目立つ青色の ＋ 新規登録 ボタン -->
             <button 
