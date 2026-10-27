@@ -1,5 +1,5 @@
 <script>
-  import { VerifyPIN } from '../../../wailsjs/go/main/App.js';
+  import { VerifyPIN } from '../adminApi.js';
 
   export let onSuccess = () => {};
   export let onCancel = () => {};

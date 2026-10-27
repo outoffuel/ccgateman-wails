@@ -9,7 +9,7 @@
     GetRecentLogs, 
     GetCurrentInsideUsers,
     ToggleFullscreen
-  } from '../../../wailsjs/go/main/App.js';
+  } from '../adminApi.js';
   import AdvancedOpsModal from './AdvancedOpsModal.svelte';
 
   export let onBackToKiosk = () => {};
@@ -31,6 +31,10 @@
 
   // Wails利用可能フラグ
   const isWailsAvailable = typeof window !== 'undefined' && window.go?.main?.App;
+  const isRemoteAvailable = typeof window !== 'undefined'
+    && !isWailsAvailable
+    && /^https?:$/.test(window.location.protocol)
+    && window.location.port === '8080';
 
   // ----------------------------------------------------------------
   // 1. 初期ダミーデータ (DB未接続時・ブラウザプレビュー用)
@@ -57,7 +61,7 @@
   // 2. データ読み込み (DB優先)
   // ----------------------------------------------------------------
   async function loadData() {
-    if (!isWailsAvailable) {
+    if (!isWailsAvailable && !isRemoteAvailable) {
       if (users.length === 0) users = [...dummyUsers];
       if (logs.length === 0) logs = [...dummyLogs];
       stats = {
@@ -563,7 +567,7 @@
       purpose: formPurpose.trim()
     };
 
-    if (isWailsAvailable) {
+    if (isWailsAvailable || isRemoteAvailable) {
       try {
         await SaveUser(userData);
         await loadData();
@@ -585,7 +589,7 @@
   async function handleDeleteUser(u) {
     const targetId = u.cardId || u.studentNo;
     if (confirm(`「${u.name}（${u.studentNo}）」を削除しますか？\n（関連する打刻ログも削除されます）`)) {
-      if (isWailsAvailable) {
+      if (isWailsAvailable || isRemoteAvailable) {
         try {
           await DeleteUser(targetId);
           await loadData();
@@ -720,7 +724,7 @@
 
       <!-- 右側：全画面切替 & 管理者表示 -->
       <div class="flex items-center gap-4">
-        {#if isWailsAvailable}
+        {#if isWailsAvailable || isRemoteAvailable}
           <button 
             on:click={async () => { await ToggleFullscreen(); }}
             class="text-xs text-slate-600 hover:text-slate-900 px-3 py-1.5 rounded-lg border border-slate-200 hover:bg-slate-50 transition font-medium"

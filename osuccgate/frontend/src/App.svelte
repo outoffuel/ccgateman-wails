@@ -3,14 +3,19 @@
   import AdminDashboard from './lib/components/AdminDashboard.svelte';
   import PINModal from './lib/components/PINModal.svelte';
 
+  const isRemoteAdmin = typeof window !== 'undefined'
+    && !window.go?.main?.App
+    && /^https?:$/.test(window.location.protocol)
+    && window.location.port === '8080';
   let currentView = 'kiosk'; // 'kiosk' | 'admin'
-  let isPinModalOpen = false;
+  let isPinModalOpen = isRemoteAdmin;
 
   function handleRequestOpenAdmin() {
     isPinModalOpen = true;
   }
 
-  function handlePinSuccess() {
+  function handlePinSuccess(pin) {
+    if (isRemoteAdmin) sessionStorage.setItem('admin_pin', pin);
     isPinModalOpen = false;
     currentView = 'admin';
   }
@@ -21,6 +26,10 @@
 
   function handleBackToKiosk() {
     currentView = 'kiosk';
+    if (isRemoteAdmin) {
+      sessionStorage.removeItem('admin_pin');
+      isPinModalOpen = true;
+    }
   }
 </script>
 

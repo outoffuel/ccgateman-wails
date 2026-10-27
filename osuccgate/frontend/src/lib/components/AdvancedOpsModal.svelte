@@ -6,7 +6,7 @@
     ExportFiscalYearLogsCSV,
     ImportUsersCSV,
     ImportLogsCSV
-  } from '../../../wailsjs/go/main/App.js';
+  } from '../adminApi.js';
 
   export let onClose = () => {};
   export let onRefresh = () => {};

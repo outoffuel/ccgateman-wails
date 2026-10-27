@@ -28,7 +28,7 @@ type App struct {
 // NewApp creates a new App application struct
 func NewApp() *App {
 	return &App{
-		adminPin: "8202", 
+		adminPin: "8202",
 	}
 }
 
@@ -66,7 +66,7 @@ func (a *App) startup(ctx context.Context) {
 	a.nfcReader.Start()
 
 	// LAN向けWeb管理者サーバーの起動 (ポート 8080)
-	a.httpServer = server.NewHTTPServer(a.dbManager, a.gateService, 8080, a.adminPin)
+	a.httpServer = server.NewHTTPServer(a.dbManager, a.gateService, 8080, a.adminPin, assets)
 	a.httpServer.Start()
 }
 
