@@ -1,12 +1,18 @@
 <script>
+  import { onMount, tick } from 'svelte';
   import { VerifyPIN } from '../adminApi.js';
 
   export let onSuccess = () => {};
   export let onCancel = () => {};
 
   let pin = '';
+  let pinInput;
   let errorMessage = '';
   let isChecking = false;
+
+  onMount(() => {
+    tick().then(() => pinInput?.focus());
+  });
 
   async function handleSubmit() {
     if (!pin) {
@@ -59,12 +65,12 @@
     <div class="mb-6">
       <input 
         type="password" 
+        bind:this={pinInput}
         bind:value={pin} 
         on:keydown={handleKeydown}
         maxlength="8" 
         placeholder="••••" 
         class="w-full text-center text-3xl tracking-widest bg-slate-800 border border-slate-700 text-white rounded-2xl py-3 px-4 focus:outline-none focus:border-blue-500 transition shadow-inner font-mono"
-        autofocus
       />
     </div>
 
