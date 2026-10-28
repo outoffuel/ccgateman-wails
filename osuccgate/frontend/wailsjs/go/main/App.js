@@ -14,6 +14,10 @@ export function GetDashboardStats() {
   return window['go']['main']['App']['GetDashboardStats']();
 }
 
+export function GetMonthlyStats() {
+  return window['go']['main']['App']['GetMonthlyStats']();
+}
+
 export function GetAllUsers() {
   return window['go']['main']['App']['GetAllUsers']();
 }
@@ -38,6 +42,22 @@ export function ClearAllLogs() {
   return window['go']['main']['App']['ClearAllLogs']();
 }
 
+export function ForceExitAllInside() {
+  return window['go']['main']['App']['ForceExitAllInside']();
+}
+
 export function ExportFiscalYearLogsCSV(arg1) {
   return window['go']['main']['App']['ExportFiscalYearLogsCSV'](arg1);
+}
+
+export function ImportUsersCSV() {
+  return window['go']['main']['App']['ImportUsersCSV']();
+}
+
+export function ImportLogsCSV() {
+  return window['go']['main']['App']['ImportLogsCSV']();
+}
+
+export function ToggleFullscreen() {
+  return window['go']['main']['App']['ToggleFullscreen']();
 }

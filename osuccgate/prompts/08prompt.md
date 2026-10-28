@@ -1,0 +1,1 @@
+カード読込時の効果音をhalflifeのエラー音https://www.myinstants.com/en/instant/otkaz-v-dostupe-38875/?utm_source=copy&utm_medium=shareと通過音https://www.myinstants.com/en/instant/knopka-iz-igry-2-47951/?utm_source=copy&utm_medium=shareに変えてみてほしい

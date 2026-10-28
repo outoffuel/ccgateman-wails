@@ -1,5 +1,12 @@
 <script>
-  import { DeleteUser, ClearAllLogs, ExportFiscalYearLogsCSV } from '../../../wailsjs/go/main/App.js';
+  import { 
+    DeleteUser, 
+    ClearAllLogs, 
+    ForceExitAllInside, 
+    ExportFiscalYearLogsCSV,
+    ImportUsersCSV,
+    ImportLogsCSV
+  } from '../adminApi.js';
 
   export let onClose = () => {};
   export let onRefresh = () => {};
@@ -12,6 +19,40 @@
 
   function handleConfirm() {
     isConfirmed = true;
+  }
+
+  async function handleImportUsers() {
+    statusMessage = '利用者CSVを読み込み中...';
+    isError = false;
+    try {
+      const msg = await ImportUsersCSV();
+      if (msg) {
+        statusMessage = msg;
+        onRefresh();
+      } else {
+        statusMessage = '利用者CSVのインポートがキャンセルされました';
+      }
+    } catch (err) {
+      isError = true;
+      statusMessage = '利用者CSVのインポートに失敗しました: ' + err;
+    }
+  }
+
+  async function handleImportLogs() {
+    statusMessage = '入退室ログCSVを読み込み中...';
+    isError = false;
+    try {
+      const msg = await ImportLogsCSV();
+      if (msg) {
+        statusMessage = msg;
+        onRefresh();
+      } else {
+        statusMessage = '入退室ログCSVのインポートがキャンセルされました';
+      }
+    } catch (err) {
+      isError = true;
+      statusMessage = '入退室ログCSVのインポートに失敗しました: ' + err;
+    }
   }
 
   async function handleExportCSV() {
@@ -30,22 +71,37 @@
     }
   }
 
+  async function handleForceExitAll() {
+    if (!confirm('現在在室中のすべての利用者を強制退室処理しますか？\n（ログには「強制退室」として記録されます）')) {
+      return;
+    }
+
+    try {
+      const count = await ForceExitAllInside();
+      statusMessage = `${count} 名の利用者を強制退室処理しました`;
+      onRefresh();
+    } catch (err) {
+      isError = true;
+      statusMessage = '強制退室処理に失敗しました: ' + err;
+    }
+  }
+
   async function handleDeleteUser() {
     const id = deleteCardId.trim();
     if (!id) {
       isError = true;
-      statusMessage = '削除するカードIDを入力してください';
+      statusMessage = '削除するカードIDまたは学籍番号を入力してください';
       return;
     }
 
-    if (!confirm(`本当にカードID: ${id} の利用者を削除しますか？\n（関連する打刻ログも削除されます）`)) {
+    if (!confirm(`本当にID: ${id} の利用者を削除しますか？\n（関連する打刻ログも削除されます）`)) {
       return;
     }
 
     try {
       await DeleteUser(id);
       deleteCardId = '';
-      statusMessage = `カードID: ${id} を削除しました`;
+      statusMessage = `ID: ${id} を削除しました`;
       onRefresh();
     } catch (err) {
       isError = true;
@@ -88,7 +144,7 @@
           【重要】システムの管理者及びリーダーに了承を得て操作を行ってください。
         </p>
         <p class="text-rose-300/80 text-xs leading-relaxed">
-          このメニューでは登録データの削除、ログの完全消去、および年度別アーカイブの書き出しを実行できます。誤った操作によるデータ消失にご注意ください。
+          このメニューでは登録データの削除、ログの完全消去、手動一斉強制退室、および年度別アーカイブの書き出しを実行できます。誤った操作によるデータ消失にご注意ください。
         </p>
       </div>
 
@@ -111,14 +167,62 @@
 
     {:else}
       <!-- 操作パネル -->
-      <div class="space-y-4 mb-6 text-left">
+      <div class="space-y-4 mb-6 text-left max-h-[70vh] overflow-y-auto pr-1">
         {#if statusMessage}
           <div class={`p-3 rounded-xl text-xs font-mono whitespace-pre-line ${isError ? 'bg-rose-950/80 border border-rose-800 text-rose-300' : 'bg-emerald-950/80 border border-emerald-800 text-emerald-300'}`}>
             {statusMessage}
           </div>
         {/if}
 
-        <!-- 1. 年度別入退室ログ出力 -->
+        <!-- 1. CSVインポート (旧システムからのデータ移行) -->
+        <div class="p-4 bg-slate-800/60 rounded-2xl border border-slate-700/60 space-y-3">
+          <div class="font-bold text-blue-400 text-sm flex items-center gap-2">
+            <span>📥</span> CSVデータインポート (旧システム移行)
+          </div>
+          <p class="text-xs text-slate-400">
+            旧システム等で管理していた利用者マスターや入退室ログのCSVファイルを一括取り込みします。
+          </p>
+          
+          <div class="grid grid-cols-1 sm:grid-cols-2 gap-3 pt-1">
+            <!-- 利用者CSVインポート -->
+            <div class="bg-slate-900/80 p-3 rounded-xl border border-slate-800 flex flex-col justify-between gap-2">
+              <div>
+                <div class="text-xs font-bold text-white flex items-center gap-1.5">
+                  <span>👥</span> 利用者登録マスター CSV
+                </div>
+                <p class="text-[11px] text-slate-400 mt-1">
+                  管理番号、登録日、ID、氏名、フリガナ、性別、区分コード(1:学生 9:学生スタッフ 0:教職員)、利用目的、連絡先を取り込みます（管理番号のない行は自動採番されます）。
+                </p>
+              </div>
+              <button 
+                on:click={handleImportUsers}
+                class="w-full bg-blue-600 hover:bg-blue-500 text-white text-xs font-bold py-2 px-3 rounded-lg transition shadow-sm"
+              >
+                利用者CSVをインポート
+              </button>
+            </div>
+
+            <!-- ログCSVインポート -->
+            <div class="bg-slate-900/80 p-3 rounded-xl border border-slate-800 flex flex-col justify-between gap-2">
+              <div>
+                <div class="text-xs font-bold text-white flex items-center gap-1.5">
+                  <span>📋</span> 入退室ログ CSV
+                </div>
+                <p class="text-[11px] text-slate-400 mt-1">
+                  過去の入退室打刻日時、種別（入室/退室/強制退室）等の履歴を取り込みます。
+                </p>
+              </div>
+              <button 
+                on:click={handleImportLogs}
+                class="w-full bg-indigo-600 hover:bg-indigo-500 text-white text-xs font-bold py-2 px-3 rounded-lg transition shadow-sm"
+              >
+                ログCSVをインポート
+              </button>
+            </div>
+          </div>
+        </div>
+
+        <!-- 2. 年度別入退室ログ出力 -->
         <div class="p-4 bg-slate-800/60 rounded-2xl border border-slate-700/60">
           <div class="font-bold text-white text-sm mb-1 flex items-center gap-2">
             <span>📊</span> yyyy年度 入退室ログ出力 (CSV)
@@ -143,7 +247,23 @@
           </div>
         </div>
 
-        <!-- 2. 登録者の削除 -->
+        <!-- 3. 手動一斉強制退室 -->
+        <div class="p-4 bg-slate-800/60 rounded-2xl border border-slate-700/60">
+          <div class="font-bold text-amber-300 text-sm mb-1 flex items-center gap-2">
+            <span>🚪</span> 在室者の一括強制退室 (手動実行)
+          </div>
+          <p class="text-xs text-slate-400 mb-3">
+            現在在室中のすべての利用者を即座に強制退室させます（毎日23:00に自動実行される処理の手動トリガーです）。
+          </p>
+          <button 
+            on:click={handleForceExitAll}
+            class="w-full bg-amber-700 hover:bg-amber-600 text-white text-sm font-bold py-2.5 px-4 rounded-xl transition shadow-sm"
+          >
+            在室中メンバーを一括強制退室
+          </button>
+        </div>
+
+        <!-- 3. 登録者の削除 -->
         <div class="p-4 bg-slate-800/60 rounded-2xl border border-slate-700/60">
           <div class="font-bold text-rose-300 text-sm mb-1 flex items-center gap-2">
             <span>🗑️</span> 登録利用者の削除
@@ -167,7 +287,7 @@
           </div>
         </div>
 
-        <!-- 3. 入退室ログ全削除 -->
+        <!-- 4. 入退室ログ全削除 -->
         <div class="p-4 bg-slate-800/60 rounded-2xl border border-slate-700/60">
           <div class="font-bold text-rose-400 text-sm mb-1 flex items-center gap-2">
             <span>💣</span> 全入退室ログの完全初期化

@@ -1,0 +1,1 @@
+ビルドはwailsからbuildしたら同時にweb要素もbuildできると思います。

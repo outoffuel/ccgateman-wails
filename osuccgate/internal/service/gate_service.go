@@ -2,12 +2,20 @@ package service
 
 import (
 	"bytes"
+	"context"
 	"encoding/csv"
 	"fmt"
+	"log"
 	"osuccgate/internal/db"
 	"osuccgate/internal/nfc"
+	"sort"
+	"strconv"
+	"strings"
 	"sync"
 	"time"
+	"unicode/utf8"
+
+	"golang.org/x/text/encoding/japanese"
 )
 
 // SwipeResponse 打刻結果レスポンス
@@ -17,11 +25,11 @@ type SwipeResponse struct {
 	CardID       string `json:"cardId"`
 	UserName     string `json:"userName"`
 	RoleName     string `json:"roleName"`
-	RoleCode     int    `json:"roleCode"`
+	RoleCode     int    `json:"roleCode"` // 0: 教職員, 1: 学生, 9: 学生スタッフ
 	StudentNo    string `json:"studentNo"`
-	EventType    string `json:"eventType"`    // "entry" or "exit"
+	EventType    string `json:"eventType"`    // "entry", "exit", "force_exit"
 	Timestamp    string `json:"timestamp"`    // "15:04:05"
-	DurationText string `json:"durationText"` // "1時間30分" (退室時のみ)
+	DurationText string `json:"durationText"` // "1時間30分" (退室・強制退室時)
 	SoundType    string `json:"soundType"`    // "studentEntry", "studentExit", "staffEntry", "staffExit", "booboo"
 	IsDebounced  bool   `json:"isDebounced"`  // デバウンスによるスキップ
 }
@@ -31,6 +39,9 @@ type GateService struct {
 	lastSwipes  map[string]time.Time
 	mu          sync.Mutex
 	debounceSec time.Duration
+
+	schedulerCancel context.CancelFunc
+	lastForceExitDay string // 23:00二重実行防止用 ("2026-08-28")
 }
 
 func NewGateService(dbMgr *db.DBManager) *GateService {
@@ -39,6 +50,52 @@ func NewGateService(dbMgr *db.DBManager) *GateService {
 		lastSwipes:  make(map[string]time.Time),
 		debounceSec: 2 * time.Second, // 要件: 2秒間の待機（受付不可）時間
 	}
+}
+
+// StartScheduler 23:00強制退室スケジューラーの開始
+func (s *GateService) StartScheduler() {
+	ctx, cancel := context.WithCancel(context.Background())
+	s.schedulerCancel = cancel
+
+	go func() {
+		ticker := time.NewTicker(30 * time.Second)
+		defer ticker.Stop()
+
+		for {
+			select {
+			case <-ctx.Done():
+				return
+			case now := <-ticker.C:
+				// 毎日 23:00 (23時00分〜23時01分の間) にチェック
+				todayStr := now.Format("2006-01-02")
+				if now.Hour() == 23 && now.Minute() == 0 {
+					if s.lastForceExitDay != todayStr {
+						s.lastForceExitDay = todayStr
+						log.Printf("[Scheduler] 23:00 reached. Executing automatic force exit for all inside users...")
+						count, err := s.dbManager.ForceExitAllInsideUsers(now)
+						if err != nil {
+							log.Printf("[Scheduler] Error during automatic force exit: %v", err)
+						} else {
+							log.Printf("[Scheduler] Automatic force exit completed. Processed %d users.", count)
+						}
+					}
+				}
+			}
+		}
+	}()
+}
+
+// StopScheduler スケジューラーの停止
+func (s *GateService) StopScheduler() {
+	if s.schedulerCancel != nil {
+		s.schedulerCancel()
+	}
+}
+
+// ForceExitAllInside 手動での一括強制退室処理
+func (s *GateService) ForceExitAllInside() (int, error) {
+	now := time.Now()
+	return s.dbManager.ForceExitAllInsideUsers(now)
 }
 
 // ProcessSwipe 打刻受付メインロジック (磁気 / NFC 共通)
@@ -99,15 +156,16 @@ func (s *GateService) ProcessSwipe(rawCardID string) *SwipeResponse {
 		}
 	}
 
-	// 音声演出タイプの決定 (ロール・入退室に応じて)
+	// 音声演出タイプの決定 (教職員: 0, 学生: 1, 学生スタッフ: 9)
 	soundType := "studentEntry"
-	if user.RoleCode == 9 || user.RoleName == "教職員" || user.RoleName == "スタッフ" {
+	if user.RoleCode == 0 || user.RoleName == "教職員" {
 		if logRecord.EventType == "entry" {
 			soundType = "staffEntry"
 		} else {
 			soundType = "staffExit"
 		}
 	} else {
+		// 学生 (1) または 学生スタッフ (9)
 		if logRecord.EventType == "entry" {
 			soundType = "studentEntry"
 		} else {
@@ -130,6 +188,7 @@ func (s *GateService) ProcessSwipe(rawCardID string) *SwipeResponse {
 }
 
 // GenerateFiscalYearCSV 指定年度のCSVバイト列を生成 (Excel対応 UTF-8 BOM付き)
+// フォーマット: 日時,ID,氏名,判定,区分,利用目的,入退室,滞在時間
 func (s *GateService) GenerateFiscalYearCSV(year int) ([]byte, error) {
 	logs, err := s.dbManager.GetFiscalYearLogs(year)
 	if err != nil {
@@ -141,8 +200,8 @@ func (s *GateService) GenerateFiscalYearCSV(year int) ([]byte, error) {
 	buf.Write([]byte{0xEF, 0xBB, 0xBF})
 
 	writer := csv.NewWriter(&buf)
-	// ヘッダー行
-	headers := []string{"ログID", "打刻日時", "識別ID", "学籍番号/職員番号", "氏名", "区分", "入退室", "滞在時間(秒)", "滞在時間"}
+	// ヘッダー行: 日時,ID,氏名,判定,区分,利用目的,入退室,滞在時間
+	headers := []string{"日時", "ID", "氏名", "判定", "区分", "利用目的", "入退室", "滞在時間"}
 	if err := writer.Write(headers); err != nil {
 		return nil, err
 	}
@@ -151,16 +210,28 @@ func (s *GateService) GenerateFiscalYearCSV(year int) ([]byte, error) {
 		eventTypeJa := "入室"
 		if l.EventType == "exit" {
 			eventTypeJa = "退室"
+		} else if l.EventType == "force_exit" {
+			eventTypeJa = "強制退室"
 		}
+
+		resultStr := "成功"
+		if l.UserName == "" || l.UserName == "未登録" {
+			resultStr = "失敗"
+		}
+
+		userID := l.StudentNo
+		if userID == "" {
+			userID = l.CardID
+		}
+
 		row := []string{
-			fmt.Sprintf("%d", l.ID),
 			l.Timestamp.Format("2006-01-02 15:04:05"),
-			l.CardID,
-			l.StudentNo,
+			userID,
 			l.UserName,
+			resultStr,
 			l.RoleName,
+			l.Purpose,
 			eventTypeJa,
-			fmt.Sprintf("%d", l.DurationSecond),
 			l.DurationText,
 		}
 		if err := writer.Write(row); err != nil {
@@ -170,4 +241,483 @@ func (s *GateService) GenerateFiscalYearCSV(year int) ([]byte, error) {
 
 	writer.Flush()
 	return buf.Bytes(), writer.Error()
+}
+
+// sanitizeCSVData BOMの削除とShift-JIS/UTF-8の正規化
+func sanitizeCSVData(data []byte) ([]byte, error) {
+	// UTF-8 BOM の除去
+	if bytes.HasPrefix(data, []byte{0xEF, 0xBB, 0xBF}) {
+		data = data[3:]
+	}
+
+	// UTF-8として有効か判定
+	if utf8.Valid(data) {
+		return data, nil
+	}
+
+	// Shift-JIS (Windows-31J/CP932) からのデコードを試みる
+	decoder := japanese.ShiftJIS.NewDecoder()
+	utf8Data, err := decoder.Bytes(data)
+	if err == nil && utf8.Valid(utf8Data) {
+		return utf8Data, nil
+	}
+
+	// フォールバック
+	return data, nil
+}
+
+// parseCustomDate 多様な日時フォーマットをパースするヘルパー
+func parseCustomDate(val string) time.Time {
+	val = strings.TrimSpace(val)
+	if val == "" {
+		return time.Now()
+	}
+	formats := []string{
+		"2006/01/02 15:04:05",
+		"2006-01-02 15:04:05",
+		"2006/1/2 15:04:05",
+		"2006-1-2 15:04:05",
+		"2006/01/02 15:04",
+		"2006-01-02 15:04",
+		"2006/1/2 15:04",
+		"2006-1-2 15:04",
+		"2006/01/02",
+		"2006-01-02",
+		"2006/1/2",
+		"2006-1-2",
+		"20060102",
+		time.RFC3339,
+	}
+	for _, f := range formats {
+		if t, err := time.ParseInLocation(f, val, time.Local); err == nil {
+			return t
+		}
+	}
+	return time.Now()
+}
+
+// ImportUsersCSV CSVデータから利用者を一括インポート
+// フォーマット: 管理番号,登録日,ID,氏名,フリガナ,性別,区分コード(1:学生 9:学生スタッフ 0:教職員),利用目的,連絡先
+func (s *GateService) ImportUsersCSV(csvData []byte) (int, int, error) {
+	cleanData, err := sanitizeCSVData(csvData)
+	if err != nil {
+		return 0, 0, fmt.Errorf("CSVデータの読み込みに失敗しました: %w", err)
+	}
+
+	reader := csv.NewReader(bytes.NewReader(cleanData))
+	reader.FieldsPerRecord = -1 // 可変長対応
+	reader.TrimLeadingSpace = true
+
+	rows, err := reader.ReadAll()
+	if err != nil {
+		return 0, 0, fmt.Errorf("CSVパースエラー: %w", err)
+	}
+
+	if len(rows) == 0 {
+		return 0, 0, fmt.Errorf("CSVデータが空です")
+	}
+
+	// ヘッダー行判定
+	headerMap := make(map[string]int)
+	startIdx := 0
+
+	// 1行目をヘッダーとして調査
+	firstRow := rows[0]
+	isHeader := false
+	for colIdx, colVal := range firstRow {
+		cleaned := strings.ToLower(strings.TrimSpace(colVal))
+		cleaned = strings.ReplaceAll(cleaned, "_", "")
+		cleaned = strings.ReplaceAll(cleaned, " ", "")
+		cleaned = strings.ReplaceAll(cleaned, "（", "(")
+		cleaned = strings.ReplaceAll(cleaned, "）", ")")
+
+		if strings.Contains(cleaned, "管理番号") || strings.Contains(cleaned, "管理no") || cleaned == "adminno" || cleaned == "no" || cleaned == "番号" {
+			headerMap["admin_no"] = colIdx
+			isHeader = true
+		} else if strings.Contains(cleaned, "登録日") || strings.Contains(cleaned, "登録日時") || strings.Contains(cleaned, "作成日") || cleaned == "createdat" || cleaned == "date" {
+			headerMap["created_at"] = colIdx
+			isHeader = true
+		} else if strings.Contains(cleaned, "学籍") || strings.Contains(cleaned, "学生番号") || strings.Contains(cleaned, "職員番号") || cleaned == "id" || cleaned == "studentid" || cleaned == "studentno" || cleaned == "cardid" || strings.Contains(cleaned, "カード") || strings.Contains(cleaned, "識別") {
+			headerMap["student_no"] = colIdx
+			isHeader = true
+		} else if strings.Contains(cleaned, "氏名") || strings.Contains(cleaned, "名前") || strings.Contains(cleaned, "ユーザー名") || cleaned == "name" || cleaned == "username" {
+			headerMap["name"] = colIdx
+			isHeader = true
+		} else if strings.Contains(cleaned, "フリガナ") || strings.Contains(cleaned, "ふりがな") || strings.Contains(cleaned, "カナ") || strings.Contains(cleaned, "かな") || cleaned == "furigana" || cleaned == "kana" {
+			headerMap["furigana"] = colIdx
+			isHeader = true
+		} else if strings.Contains(cleaned, "性別") || strings.Contains(cleaned, "性") || cleaned == "gender" || cleaned == "sex" {
+			headerMap["gender"] = colIdx
+			isHeader = true
+		} else if strings.Contains(cleaned, "区分") || strings.Contains(cleaned, "ロール") || strings.Contains(cleaned, "役職") || strings.Contains(cleaned, "属性") || cleaned == "role" || cleaned == "rolecode" || cleaned == "rolename" {
+			headerMap["role_name"] = colIdx
+			isHeader = true
+		} else if strings.Contains(cleaned, "利用目的") || strings.Contains(cleaned, "目的") || cleaned == "purpose" {
+			headerMap["purpose"] = colIdx
+			isHeader = true
+		} else if strings.Contains(cleaned, "連絡先") || strings.Contains(cleaned, "電話番号") || strings.Contains(cleaned, "メール") || cleaned == "contact" || cleaned == "tel" || cleaned == "phone" || cleaned == "email" {
+			headerMap["contact"] = colIdx
+			isHeader = true
+		}
+	}
+
+	if isHeader {
+		startIdx = 1
+	}
+
+	// 既存DBの管理番号の最大整数値を取得（自動採番・振り直し用）
+	currentMaxAdminNo := 0
+	if s.dbManager != nil {
+		currentMaxAdminNo, _ = s.dbManager.GetMaxAdminNo()
+	}
+
+	// CSV内で指定されている既存の数値管理番号があれば最大値を把握
+	for i := startIdx; i < len(rows); i++ {
+		row := rows[i]
+		if len(row) == 0 {
+			continue
+		}
+		var aNoStr string
+		if idx, ok := headerMap["admin_no"]; ok && idx < len(row) {
+			aNoStr = strings.TrimSpace(row[idx])
+		} else if !isHeader && 0 < len(row) {
+			aNoStr = strings.TrimSpace(row[0])
+		}
+		if n, err := strconv.Atoi(aNoStr); err == nil && n > currentMaxAdminNo {
+			currentMaxAdminNo = n
+		}
+	}
+
+	var users []db.RegisteredUser
+	for i := startIdx; i < len(rows); i++ {
+		row := rows[i]
+		if len(row) == 0 {
+			continue
+		}
+
+		getCol := func(key string, fallbackIdx int) string {
+			if idx, ok := headerMap[key]; ok && idx < len(row) {
+				return strings.TrimSpace(row[idx])
+			}
+			if !isHeader && fallbackIdx < len(row) {
+				return strings.TrimSpace(row[fallbackIdx])
+			}
+			return ""
+		}
+
+		// 0: 管理番号, 1: 登録日, 2: ID, 3: 氏名, 4: フリガナ, 5: 性別, 6: 区分コード, 7: 利用目的, 8: 連絡先
+		adminNo := getCol("admin_no", 0)
+		createdAtStr := getCol("created_at", 1)
+		studentNo := getCol("student_no", 2)
+		name := getCol("name", 3)
+		furigana := getCol("furigana", 4)
+		gender := getCol("gender", 5)
+		roleStr := getCol("role_name", 6)
+		purpose := getCol("purpose", 7)
+		contact := getCol("contact", 8)
+
+		if studentNo == "" && name == "" && adminNo == "" {
+			continue // 空行スキップ
+		}
+
+		// カードIDおよび学籍番号
+		cardID := studentNo
+		if studentNo == "" && cardID == "" {
+			continue // IDが特定できない行はスキップ
+		}
+
+		// 管理番号がない場合はシステム側で自動連番採番
+		if adminNo == "" {
+			currentMaxAdminNo++
+			adminNo = strconv.Itoa(currentMaxAdminNo)
+		}
+
+		// 登録日のパース
+		createdAt := parseCustomDate(createdAtStr)
+
+		// 区分・ロールコードの解決 (0: 教職員, 1: 学生, 9: 学生スタッフ)
+		roleName := "学生"
+		roleCode := 1
+		roleTrimmed := strings.TrimSpace(roleStr)
+
+		if strings.Contains(roleTrimmed, "教職員") || strings.Contains(roleTrimmed, "教員") || strings.Contains(roleTrimmed, "職員") || roleTrimmed == "0" {
+			roleName = "教職員"
+			roleCode = 0
+		} else if strings.Contains(roleTrimmed, "スタッフ") || roleTrimmed == "9" {
+			roleName = "学生スタッフ"
+			roleCode = 9
+		} else {
+			roleName = "学生"
+			roleCode = 1
+		}
+
+		// 性別の正規化
+		genderNorm := ""
+		if strings.Contains(gender, "男") || strings.ToLower(gender) == "male" || strings.ToLower(gender) == "m" || gender == "1" {
+			genderNorm = "男"
+		} else if strings.Contains(gender, "女") || strings.ToLower(gender) == "female" || strings.ToLower(gender) == "f" || gender == "2" {
+			genderNorm = "女"
+		} else {
+			genderNorm = gender
+		}
+
+		users = append(users, db.RegisteredUser{
+			CardID:    cardID,
+			Name:      name,
+			Furigana:  furigana,
+			Gender:    genderNorm,
+			RoleName:  roleName,
+			RoleCode:  roleCode,
+			StudentNo: studentNo,
+			AdminNo:   adminNo,
+			Purpose:   purpose,
+			Contact:   contact,
+			CreatedAt: createdAt,
+			UpdatedAt: time.Now(),
+		})
+	}
+
+	if len(users) == 0 {
+		return 0, len(rows) - startIdx, fmt.Errorf("インポート可能な利用者データが見つかりませんでした")
+	}
+
+	count, err := s.dbManager.ImportUsers(users)
+	return count, len(users), err
+}
+
+// ImportLogsCSV CSVデータから入退室ログを一括インポート
+func (s *GateService) ImportLogsCSV(csvData []byte) (int, int, error) {
+	cleanData, err := sanitizeCSVData(csvData)
+	if err != nil {
+		return 0, 0, fmt.Errorf("CSVデータの読み込みに失敗しました: %w", err)
+	}
+
+	reader := csv.NewReader(bytes.NewReader(cleanData))
+	reader.FieldsPerRecord = -1
+	reader.TrimLeadingSpace = true
+
+	rows, err := reader.ReadAll()
+	if err != nil {
+		return 0, 0, fmt.Errorf("CSVパースエラー: %w", err)
+	}
+
+	if len(rows) == 0 {
+		return 0, 0, fmt.Errorf("CSVデータが空です")
+	}
+
+	headerMap := make(map[string]int)
+	startIdx := 0
+
+	firstRow := rows[0]
+	isHeader := false
+	for colIdx, colVal := range firstRow {
+		cleaned := strings.ToLower(strings.TrimSpace(colVal))
+		cleaned = strings.ReplaceAll(cleaned, "_", "")
+		cleaned = strings.ReplaceAll(cleaned, " ", "")
+		cleaned = strings.ReplaceAll(cleaned, "（", "(")
+		cleaned = strings.ReplaceAll(cleaned, "）", ")")
+
+		if strings.Contains(cleaned, "日時") || strings.Contains(cleaned, "時刻") || strings.Contains(cleaned, "timestamp") || strings.Contains(cleaned, "date") || strings.Contains(cleaned, "time") {
+			headerMap["timestamp"] = colIdx
+			isHeader = true
+		} else if cleaned == "id" || strings.Contains(cleaned, "識別") || strings.Contains(cleaned, "カード") || strings.Contains(cleaned, "学籍") || strings.Contains(cleaned, "学生番号") || cleaned == "cardid" || cleaned == "studentno" {
+			headerMap["card_id"] = colIdx
+			isHeader = true
+		} else if strings.Contains(cleaned, "入退室") || strings.Contains(cleaned, "種別") || strings.Contains(cleaned, "イベント") || strings.Contains(cleaned, "ステータス") || cleaned == "eventtype" || cleaned == "type" || cleaned == "status" {
+			headerMap["event_type"] = colIdx
+			isHeader = true
+		} else if strings.Contains(cleaned, "滞在時間") || strings.Contains(cleaned, "秒") || strings.Contains(cleaned, "duration") {
+			headerMap["duration"] = colIdx
+			isHeader = true
+		}
+	}
+
+	if isHeader {
+		startIdx = 1
+	}
+
+	var logs []db.AccessLog
+	timeFormats := []string{
+		"2006-01-02 15:04:05",
+		"2006/01/02 15:04:05",
+		time.RFC3339,
+		"2006-01-02T15:04:05",
+		"2006/01/02 15:04",
+		"2006-01-02 15:04",
+	}
+
+	for i := startIdx; i < len(rows); i++ {
+		row := rows[i]
+		if len(row) == 0 {
+			continue
+		}
+
+		getCol := func(key string, fallbackIdx int) string {
+			if idx, ok := headerMap[key]; ok && idx < len(row) {
+				return strings.TrimSpace(row[idx])
+			}
+			if !isHeader && fallbackIdx < len(row) {
+				return strings.TrimSpace(row[fallbackIdx])
+			}
+			return ""
+		}
+
+		tsStr := getCol("timestamp", 0)
+		cardID := getCol("card_id", 1)
+		eventStr := getCol("event_type", 6)
+		durStr := getCol("duration", 7)
+
+		if tsStr == "" && cardID == "" {
+			continue
+		}
+
+		// 日時パース
+		var parsedTime time.Time
+		for _, layout := range timeFormats {
+			if t, err := time.Parse(layout, tsStr); err == nil {
+				parsedTime = t
+				break
+			}
+		}
+		if parsedTime.IsZero() {
+			parsedTime = time.Now()
+		}
+
+		// 種別パース
+		eventType := "entry"
+		eventTrimmed := strings.TrimSpace(eventStr)
+		if strings.Contains(eventTrimmed, "強制退室") || eventTrimmed == "force_exit" {
+			eventType = "force_exit"
+		} else if strings.Contains(eventTrimmed, "退室") || strings.Contains(eventTrimmed, "退") || strings.ToLower(eventTrimmed) == "exit" || strings.ToLower(eventTrimmed) == "out" {
+			eventType = "exit"
+		} else {
+			eventType = "entry"
+		}
+
+		var durSec int64 = 0
+		if durStr != "" {
+			if n, err := strconv.ParseInt(durStr, 10, 64); err == nil {
+				durSec = n
+			} else {
+				// "1時間23分" などのテキストから秒数を逆算
+				durSec = parseDurationStringToSeconds(durStr)
+			}
+		}
+
+		// cardID のユーザー解決（学籍番号またはカードIDから既存カードIDを探す）
+		if cardID != "" {
+			if u, _ := s.dbManager.GetUser(cardID); u != nil {
+				cardID = u.CardID
+			}
+		}
+
+		logs = append(logs, db.AccessLog{
+			CardID:         cardID,
+			EventType:      eventType,
+			Timestamp:      parsedTime,
+			DurationSecond: durSec,
+		})
+	}
+
+	if len(logs) == 0 {
+		return 0, len(rows) - startIdx, fmt.Errorf("インポート可能なログデータが見つかりませんでした")
+	}
+
+	// ログを時系列順にソート
+	sort.Slice(logs, func(i, j int) bool {
+		return logs[i].Timestamp.Before(logs[j].Timestamp)
+	})
+
+	// 過去ログをインポートした場合、その日のうちに退室したものとして自動補完処理を行う
+	todayStr := time.Now().Format("2006-01-02")
+	type userDayState struct {
+		lastEvent string
+		lastTime  time.Time
+		lastDate  string
+	}
+	cardStates := make(map[string]userDayState)
+
+	var finalLogs []db.AccessLog
+	for _, l := range logs {
+		logDate := l.Timestamp.Format("2006-01-02")
+		state, exists := cardStates[l.CardID]
+
+		// 過去日において、前日のentryが未退室のまま次の日のログが来た場合、前日の23:00に自動強制退室を補完
+		if exists && state.lastEvent == "entry" && state.lastDate < logDate {
+			exitTime, _ := time.ParseInLocation("2006-01-02 15:04:05", state.lastDate+" 23:00:00", state.lastTime.Location())
+			if exitTime.Before(state.lastTime) {
+				exitTime, _ = time.ParseInLocation("2006-01-02 15:04:05", state.lastDate+" 23:59:59", state.lastTime.Location())
+			}
+			dur := int64(exitTime.Sub(state.lastTime).Seconds())
+			if dur < 0 {
+				dur = 0
+			}
+			finalLogs = append(finalLogs, db.AccessLog{
+				CardID:         l.CardID,
+				EventType:      "force_exit",
+				Timestamp:      exitTime,
+				DurationSecond: dur,
+			})
+			cardStates[l.CardID] = userDayState{lastEvent: "force_exit", lastTime: exitTime, lastDate: state.lastDate}
+		}
+
+		finalLogs = append(finalLogs, l)
+		cardStates[l.CardID] = userDayState{
+			lastEvent: l.EventType,
+			lastTime:  l.Timestamp,
+			lastDate:  logDate,
+		}
+	}
+
+	// 全ログ処理後、過去日（本日より前）でentryのまま終わっているカードがあれば同日23:00に自動退室を追加
+	for cardID, state := range cardStates {
+		if state.lastEvent == "entry" && state.lastDate < todayStr {
+			exitTime, _ := time.ParseInLocation("2006-01-02 15:04:05", state.lastDate+" 23:00:00", state.lastTime.Location())
+			if exitTime.Before(state.lastTime) {
+				exitTime, _ = time.ParseInLocation("2006-01-02 15:04:05", state.lastDate+" 23:59:59", state.lastTime.Location())
+			}
+			dur := int64(exitTime.Sub(state.lastTime).Seconds())
+			if dur < 0 {
+				dur = 0
+			}
+			finalLogs = append(finalLogs, db.AccessLog{
+				CardID:         cardID,
+				EventType:      "force_exit",
+				Timestamp:      exitTime,
+				DurationSecond: dur,
+			})
+		}
+	}
+
+	// 補完後の全ログを時系列で再ソート
+	sort.Slice(finalLogs, func(i, j int) bool {
+		return finalLogs[i].Timestamp.Before(finalLogs[j].Timestamp)
+	})
+
+	count, err := s.dbManager.ImportLogs(finalLogs)
+	return count, len(finalLogs), err
+}
+
+// parseDurationStringToSeconds "1時間23分" や "45分" "30秒" を秒数に変換
+func parseDurationStringToSeconds(s string) int64 {
+	s = strings.TrimSpace(s)
+	if s == "" || s == "-" {
+		return 0
+	}
+	var totalSec int64 = 0
+	if idx := strings.Index(s, "時間"); idx != -1 {
+		hours, _ := strconv.ParseInt(strings.TrimSpace(s[:idx]), 10, 64)
+		totalSec += hours * 3600
+		s = s[idx+len("時間"):]
+	}
+	if idx := strings.Index(s, "分"); idx != -1 {
+		mins, _ := strconv.ParseInt(strings.TrimSpace(s[:idx]), 10, 64)
+		totalSec += mins * 60
+		s = s[idx+len("分"):]
+	}
+	if idx := strings.Index(s, "秒"); idx != -1 {
+		secs, _ := strconv.ParseInt(strings.TrimSpace(s[:idx]), 10, 64)
+		totalSec += secs
+	}
+	return totalSec
 }

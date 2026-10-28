@@ -5,6 +5,8 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"strconv"
+	"strings"
 	"sync"
 	"time"
 
@@ -13,45 +15,73 @@ import (
 
 // RegisteredUser 登録利用者
 type RegisteredUser struct {
-	CardID    string    `json:"cardId"`    // 磁気カード番号 / NFC IDm
+	CardID    string    `json:"cardId"`    // 磁気カード番号 / NFC IDm (空の場合は学籍番号と同一)
 	Name      string    `json:"name"`      // 氏名
-	RoleName  string    `json:"roleName"`  // 学生, 教職員, スタッフ 等
-	RoleCode  int       `json:"roleCode"`  // 1: 学生, 9: 教職員, etc.
-	StudentNo string    `json:"studentNo"` // 学籍番号/職員番号 (任意)
+	Furigana  string    `json:"furigana"`  // フリガナ
+	Gender    string    `json:"gender"`    // 性別 ("男", "女" 等)
+	RoleName  string    `json:"roleName"`  // 教職員, 学生, 学生スタッフ 等
+	RoleCode  int       `json:"roleCode"`  // 0: 教職員, 1: 学生, 9: 学生スタッフ
+	StudentNo string    `json:"studentNo"` // 学籍番号/職員番号 (必須)
+	AdminNo   string    `json:"adminNo"`   // 管理番号 (自動採番 / CSV指定)
+	Purpose   string    `json:"purpose"`   // 利用目的
+	Contact   string    `json:"contact"`   // 連絡先 (電話番号/メール等)
 	CreatedAt time.Time `json:"createdAt"`
 	UpdatedAt time.Time `json:"updatedAt"`
 }
 
 // AccessLog 入退室ログ
 type AccessLog struct {
-	ID             int64      `json:"id"`
-	CardID         string     `json:"cardId"`
-	UserName       string     `json:"userName"`
-	RoleName       string     `json:"roleName"`
-	RoleCode       int        `json:"roleCode"`
-	StudentNo      string     `json:"studentNo"`
-	EventType      string     `json:"eventType"` // "entry" (入室) or "exit" (退室)
-	Timestamp      time.Time  `json:"timestamp"`
-	DurationSecond int64      `json:"durationSecond"` // 退室時に算出 (秒単位)
-	DurationText   string     `json:"durationText"`   // "1時間23分" 等
+	ID             int64     `json:"id"`
+	CardID         string    `json:"cardId"`
+	UserName       string    `json:"userName"`
+	RoleName       string    `json:"roleName"`
+	RoleCode       int       `json:"roleCode"`
+	StudentNo      string    `json:"studentNo"`
+	Purpose        string    `json:"purpose"`        // 利用目的
+	EventType      string    `json:"eventType"`      // "entry" (入室), "exit" (退室), "force_exit" (強制退室)
+	Timestamp      time.Time `json:"timestamp"`
+	DurationSecond int64     `json:"durationSecond"` // 退室・強制退室時に算出 (秒単位)
+	DurationText   string    `json:"durationText"`   // "1時間23分" 等
 }
 
 // UserStatus 在室状態・最新ログ
 type UserStatus struct {
-	CardID         string    `json:"cardId"`
-	UserName       string    `json:"userName"`
-	RoleName       string    `json:"roleName"`
-	StudentNo      string    `json:"studentNo"`
-	CurrentStatus  string    `json:"currentStatus"` // "inside" (在室中) or "outside" (退室済)
-	LastEventTime  time.Time `json:"lastEventTime"`
-	StayDuration   string    `json:"stayDuration"`  // 在室中の場合は現在までの滞在時間
+	CardID        string    `json:"cardId"`
+	UserName      string    `json:"userName"`
+	RoleName      string    `json:"roleName"`
+	StudentNo     string    `json:"studentNo"`
+	CurrentStatus string    `json:"currentStatus"` // "inside" (在室中) or "outside" (退室済)
+	LastEventTime time.Time `json:"lastEventTime"`
+	StayDuration  string    `json:"stayDuration"` // 在室中の場合は現在までの滞在時間
 }
 
 // DashboardStats ダッシュボード統計
 type DashboardStats struct {
 	CurrentInsideCount int `json:"currentInsideCount"` // 現在の在室者数
 	TotalUserCount     int `json:"totalUserCount"`     // 登録総数
-	TodayLogCount      int `json:"todayLogCount"`      // 本日の総打刻数
+	TodayLogCount      int `json:"todayLogCount"`      // 本日の総入退室数
+	WeekLogCount       int `json:"weekLogCount"`       // 週間の入退室数 (直近7日間/今週)
+	MonthLogCount      int `json:"monthLogCount"`      // 月間の入退室数 (当月)
+	YearLogCount       int `json:"yearLogCount"`       // 年間の入退室数 (今年度/年間)
+}
+
+// MonthlyStatRow 月別・区分別打刻統計行データ (01prompt, 19prompt要件)
+type MonthlyStatRow struct {
+	YearMonth                 string `json:"yearMonth"`                 // "2026-09"
+	RoleOtherCount            int    `json:"roleOtherCount"`            // "-" (区分未設定 / その他)
+	Role0Count                int    `json:"role0Count"`                // "0（教職員）"
+	Role1Count                int    `json:"role1Count"`                // "1（学生）"
+	Role9Count                int    `json:"role9Count"`                // "9（スタッフ）"
+	MonthlyTotal              int    `json:"monthlyTotal"`              // 当月合計
+	FiscalYear                int    `json:"fiscalYear"`                // 2026 (年度)
+	FiscalYearCumulativeTotal int    `json:"fiscalYearCumulativeTotal"` // 当月までの合計 (年度累計)
+	QuarterPeriod             string `json:"quarterPeriod"`             // 四半期ラベル ("4月～6月", "7月～9月", "10月～12月", "1月～3月")
+	QuarterTotal              int    `json:"quarterTotal"`              // 当該四半期合計
+}
+
+// MonthlyStatsResponse 月別統計レスポンス
+type MonthlyStatsResponse struct {
+	Rows []MonthlyStatRow `json:"rows"`
 }
 
 type DBManager struct {
@@ -71,8 +101,8 @@ func InitDB(dbPath string) (*DBManager, error) {
 		return nil, fmt.Errorf("failed to open sqlite database: %w", err)
 	}
 
-	// コネクションプール設定
-	db.SetMaxOpenConns(1) // SQLiteの書き込み競合を防ぐため1に設定 (WALモードと合わせて安全化)
+	// コネクションプール設定 (書き込み競合防止)
+	db.SetMaxOpenConns(1)
 
 	mgr := &DBManager{db: db}
 	if err := mgr.createTables(); err != nil {
@@ -92,9 +122,14 @@ func (m *DBManager) createTables() error {
 	CREATE TABLE IF NOT EXISTS registered_users (
 		card_id TEXT PRIMARY KEY,
 		name TEXT NOT NULL,
+		furigana TEXT NOT NULL DEFAULT '',
+		gender TEXT NOT NULL DEFAULT '',
 		role_name TEXT NOT NULL,
-		role_code INTEGER NOT NULL DEFAULT 1,
+		role_code INTEGER NOT NULL DEFAULT 1, -- 0:教職員, 1:学生, 9:学生スタッフ
 		student_no TEXT NOT NULL DEFAULT '',
+		admin_no TEXT NOT NULL DEFAULT '',
+		purpose TEXT NOT NULL DEFAULT '',
+		contact TEXT NOT NULL DEFAULT '',
 		created_at DATETIME NOT NULL,
 		updated_at DATETIME NOT NULL
 	);
@@ -102,7 +137,7 @@ func (m *DBManager) createTables() error {
 	CREATE TABLE IF NOT EXISTS access_logs (
 		id INTEGER PRIMARY KEY AUTOINCREMENT,
 		card_id TEXT NOT NULL,
-		event_type TEXT NOT NULL, -- 'entry' or 'exit'
+		event_type TEXT NOT NULL, -- 'entry', 'exit', 'force_exit'
 		timestamp DATETIME NOT NULL,
 		duration_second INTEGER NOT NULL DEFAULT 0,
 		FOREIGN KEY(card_id) REFERENCES registered_users(card_id) ON DELETE CASCADE
@@ -110,22 +145,32 @@ func (m *DBManager) createTables() error {
 
 	CREATE INDEX IF NOT EXISTS idx_access_logs_card_id ON access_logs(card_id);
 	CREATE INDEX IF NOT EXISTS idx_access_logs_timestamp ON access_logs(timestamp);
+	CREATE INDEX IF NOT EXISTS idx_registered_users_student_no ON registered_users(student_no);
 	`
-	_, err := m.db.Exec(schema)
-	return err
+	if _, err := m.db.Exec(schema); err != nil {
+		return err
+	}
+
+	// 既存DB用カラムマイグレーション
+	_, _ = m.db.Exec(`ALTER TABLE registered_users ADD COLUMN furigana TEXT NOT NULL DEFAULT ''`)
+	_, _ = m.db.Exec(`ALTER TABLE registered_users ADD COLUMN gender TEXT NOT NULL DEFAULT ''`)
+	_, _ = m.db.Exec(`ALTER TABLE registered_users ADD COLUMN admin_no TEXT NOT NULL DEFAULT ''`)
+	_, _ = m.db.Exec(`ALTER TABLE registered_users ADD COLUMN purpose TEXT NOT NULL DEFAULT ''`)
+	_, _ = m.db.Exec(`ALTER TABLE registered_users ADD COLUMN contact TEXT NOT NULL DEFAULT ''`)
+	return nil
 }
 
-// GetUser 登録ユーザー取得
-func (m *DBManager) GetUser(cardID string) (*RegisteredUser, error) {
+// GetUser 登録ユーザー取得 (card_id または student_no のどちらでも検索可能)
+func (m *DBManager) GetUser(identifier string) (*RegisteredUser, error) {
 	m.mu.RLock()
 	defer m.mu.RUnlock()
 
-	query := `SELECT card_id, name, role_name, role_code, student_no, created_at, updated_at FROM registered_users WHERE card_id = ?`
-	row := m.db.QueryRow(query, cardID)
+	query := `SELECT card_id, name, furigana, gender, role_name, role_code, student_no, admin_no, purpose, contact, created_at, updated_at FROM registered_users WHERE card_id = ? OR (student_no != '' AND student_no = ?) LIMIT 1`
+	row := m.db.QueryRow(query, identifier, identifier)
 
 	var u RegisteredUser
 	var createdAtStr, updatedAtStr string
-	err := row.Scan(&u.CardID, &u.Name, &u.RoleName, &u.RoleCode, &u.StudentNo, &createdAtStr, &updatedAtStr)
+	err := row.Scan(&u.CardID, &u.Name, &u.Furigana, &u.Gender, &u.RoleName, &u.RoleCode, &u.StudentNo, &u.AdminNo, &u.Purpose, &u.Contact, &createdAtStr, &updatedAtStr)
 	if err != nil {
 		if err == sql.ErrNoRows {
 			return nil, nil
@@ -148,7 +193,7 @@ func (m *DBManager) GetAllUsers() ([]RegisteredUser, error) {
 	m.mu.RLock()
 	defer m.mu.RUnlock()
 
-	query := `SELECT card_id, name, role_name, role_code, student_no, created_at, updated_at FROM registered_users ORDER BY role_code ASC, student_no ASC, name ASC`
+	query := `SELECT card_id, name, furigana, gender, role_name, role_code, student_no, admin_no, purpose, contact, created_at, updated_at FROM registered_users ORDER BY role_code ASC, student_no ASC, name ASC`
 	rows, err := m.db.Query(query)
 	if err != nil {
 		return nil, err
@@ -159,7 +204,7 @@ func (m *DBManager) GetAllUsers() ([]RegisteredUser, error) {
 	for rows.Next() {
 		var u RegisteredUser
 		var createdAtStr, updatedAtStr string
-		if err := rows.Scan(&u.CardID, &u.Name, &u.RoleName, &u.RoleCode, &u.StudentNo, &createdAtStr, &updatedAtStr); err != nil {
+		if err := rows.Scan(&u.CardID, &u.Name, &u.Furigana, &u.Gender, &u.RoleName, &u.RoleCode, &u.StudentNo, &u.AdminNo, &u.Purpose, &u.Contact, &createdAtStr, &updatedAtStr); err != nil {
 			return nil, err
 		}
 		u.CreatedAt, _ = time.Parse(time.RFC3339, createdAtStr)
@@ -175,24 +220,163 @@ func (m *DBManager) GetAllUsers() ([]RegisteredUser, error) {
 	return users, nil
 }
 
+// GetMaxAdminNo 既存ユーザーに設定されている管理番号の最大整数値を取得 (自動採番用)
+func (m *DBManager) GetMaxAdminNo() (int, error) {
+	m.mu.RLock()
+	defer m.mu.RUnlock()
+
+	rows, err := m.db.Query("SELECT admin_no FROM registered_users WHERE admin_no != ''")
+	if err != nil {
+		return 0, err
+	}
+	defer rows.Close()
+
+	maxNo := 0
+	for rows.Next() {
+		var s string
+		if err := rows.Scan(&s); err == nil {
+			s = strings.TrimSpace(s)
+			if n, err := strconv.Atoi(s); err == nil {
+				if n > maxNo {
+					maxNo = n
+				}
+			}
+		}
+	}
+	return maxNo, nil
+}
+
 // UpsertUser ユーザー登録・更新
 func (m *DBManager) UpsertUser(u *RegisteredUser) error {
 	m.mu.Lock()
 	defer m.mu.Unlock()
 
+	if u.CardID == "" {
+		u.CardID = u.StudentNo
+	}
+
 	now := time.Now()
 	query := `
-	INSERT INTO registered_users (card_id, name, role_name, role_code, student_no, created_at, updated_at)
-	VALUES (?, ?, ?, ?, ?, ?, ?)
+	INSERT INTO registered_users (card_id, name, furigana, gender, role_name, role_code, student_no, admin_no, purpose, contact, created_at, updated_at)
+	VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
 	ON CONFLICT(card_id) DO UPDATE SET
 		name = excluded.name,
+		furigana = excluded.furigana,
+		gender = excluded.gender,
 		role_name = excluded.role_name,
 		role_code = excluded.role_code,
 		student_no = excluded.student_no,
+		admin_no = CASE WHEN excluded.admin_no != '' THEN excluded.admin_no ELSE registered_users.admin_no END,
+		purpose = excluded.purpose,
+		contact = excluded.contact,
 		updated_at = excluded.updated_at
 	`
-	_, err := m.db.Exec(query, u.CardID, u.Name, u.RoleName, u.RoleCode, u.StudentNo, now.Format(time.RFC3339), now.Format(time.RFC3339))
+	_, err := m.db.Exec(query, u.CardID, u.Name, u.Furigana, u.Gender, u.RoleName, u.RoleCode, u.StudentNo, u.AdminNo, u.Purpose, u.Contact, now.Format(time.RFC3339), now.Format(time.RFC3339))
 	return err
+}
+
+// ImportUsers 複数ユーザーの一括インポート・Upsert
+func (m *DBManager) ImportUsers(users []RegisteredUser) (int, error) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+
+	tx, err := m.db.Begin()
+	if err != nil {
+		return 0, err
+	}
+	defer tx.Rollback()
+
+	stmt, err := tx.Prepare(`
+	INSERT INTO registered_users (card_id, name, furigana, gender, role_name, role_code, student_no, admin_no, purpose, contact, created_at, updated_at)
+	VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+	ON CONFLICT(card_id) DO UPDATE SET
+		name = excluded.name,
+		furigana = excluded.furigana,
+		gender = excluded.gender,
+		role_name = excluded.role_name,
+		role_code = excluded.role_code,
+		student_no = excluded.student_no,
+		admin_no = CASE WHEN excluded.admin_no != '' THEN excluded.admin_no ELSE registered_users.admin_no END,
+		purpose = excluded.purpose,
+		contact = excluded.contact,
+		updated_at = excluded.updated_at
+	`)
+	if err != nil {
+		return 0, err
+	}
+	defer stmt.Close()
+
+	now := time.Now()
+	count := 0
+	for _, u := range users {
+		cardID := u.CardID
+		if cardID == "" {
+			cardID = u.StudentNo
+		}
+		if cardID == "" {
+			continue
+		}
+		createdAt := u.CreatedAt
+		if createdAt.IsZero() {
+			createdAt = now
+		}
+		updatedAt := u.UpdatedAt
+		if updatedAt.IsZero() {
+			updatedAt = now
+		}
+		_, err := stmt.Exec(cardID, u.Name, u.Furigana, u.Gender, u.RoleName, u.RoleCode, u.StudentNo, u.AdminNo, u.Purpose, u.Contact, createdAt.Format(time.RFC3339), updatedAt.Format(time.RFC3339))
+		if err != nil {
+			return count, err
+		}
+		count++
+	}
+
+	if err := tx.Commit(); err != nil {
+		return 0, err
+	}
+	return count, nil
+}
+
+// ImportLogs 過去の入退室ログ一括インポート
+func (m *DBManager) ImportLogs(logs []AccessLog) (int, error) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+
+	tx, err := m.db.Begin()
+	if err != nil {
+		return 0, err
+	}
+	defer tx.Rollback()
+
+	stmt, err := tx.Prepare(`
+	INSERT INTO access_logs (card_id, event_type, timestamp, duration_second)
+	VALUES (?, ?, ?, ?)
+	`)
+	if err != nil {
+		return 0, err
+	}
+	defer stmt.Close()
+
+	count := 0
+	for _, l := range logs {
+		if l.CardID == "" {
+			continue
+		}
+		ts := l.Timestamp
+		if ts.IsZero() {
+			ts = time.Now()
+		}
+		_, err := stmt.Exec(l.CardID, l.EventType, ts.Format(time.RFC3339), l.DurationSecond)
+		if err != nil {
+			return count, err
+		}
+		count++
+	}
+
+	if err := tx.Commit(); err != nil {
+		return 0, err
+	}
+	return count, nil
 }
 
 // DeleteUser ユーザー削除
@@ -200,37 +384,8 @@ func (m *DBManager) DeleteUser(cardID string) error {
 	m.mu.Lock()
 	defer m.mu.Unlock()
 
-	_, err := m.db.Exec("DELETE FROM registered_users WHERE card_id = ?", cardID)
+	_, err := m.db.Exec("DELETE FROM registered_users WHERE card_id = ? OR student_no = ?", cardID, cardID)
 	return err
-}
-
-// GetLastLog 該当カードの直近ログを取得
-func (m *DBManager) GetLastLog(cardID string) (*AccessLog, error) {
-	m.mu.RLock()
-	defer m.mu.RUnlock()
-
-	query := `
-	SELECT id, card_id, event_type, timestamp, duration_second
-	FROM access_logs
-	WHERE card_id = ?
-	ORDER BY id DESC LIMIT 1
-	`
-	row := m.db.QueryRow(query, cardID)
-
-	var log AccessLog
-	var tsStr string
-	err := row.Scan(&log.ID, &log.CardID, &log.EventType, &tsStr, &log.DurationSecond)
-	if err != nil {
-		if err == sql.ErrNoRows {
-			return nil, nil
-		}
-		return nil, err
-	}
-	log.Timestamp, _ = time.Parse(time.RFC3339, tsStr)
-	if log.Timestamp.IsZero() {
-		log.Timestamp, _ = time.Parse("2006-01-02 15:04:05", tsStr)
-	}
-	return &log, nil
 }
 
 // RecordSwipe 打刻処理 (入退室判定＆ログ記録)
@@ -248,11 +403,10 @@ func (m *DBManager) RecordSwipe(user *RegisteredUser) (*AccessLog, error) {
 	row := m.db.QueryRow(queryLast, user.CardID)
 	err := row.Scan(&lastID, &lastEventType, &lastTsStr)
 
-	eventType := "entry" // デフォルトは入室 (1回目/奇数回)
+	eventType := "entry" // デフォルトは入室 (1回目/奇数回、または前回退室/強制退室時)
 	var durationSec int64 = 0
 
 	if err == nil {
-		// 前回の打刻が存在する場合
 		if lastEventType == "entry" {
 			// 前回入室 -> 今回は退室
 			eventType = "exit"
@@ -265,7 +419,7 @@ func (m *DBManager) RecordSwipe(user *RegisteredUser) (*AccessLog, error) {
 				durationSec = 0
 			}
 		} else {
-			// 前回退室 -> 今回は入室
+			// 前回 exit または force_exit -> 今回は入室
 			eventType = "entry"
 		}
 	}
@@ -280,7 +434,7 @@ func (m *DBManager) RecordSwipe(user *RegisteredUser) (*AccessLog, error) {
 	newID, _ := res.LastInsertId()
 
 	durationText := ""
-	if eventType == "exit" && durationSec > 0 {
+	if (eventType == "exit" || eventType == "force_exit") && durationSec > 0 {
 		durationText = FormatDuration(durationSec)
 	}
 
@@ -298,6 +452,79 @@ func (m *DBManager) RecordSwipe(user *RegisteredUser) (*AccessLog, error) {
 	}, nil
 }
 
+// ForceExitAllInsideUsers 23:00等に在室中の全ユーザーを一括強制退室処理する
+func (m *DBManager) ForceExitAllInsideUsers(exitTime time.Time) (int, error) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+
+	// 現在在室中（最新ログが 'entry'）のカード一覧と入室日時を取得
+	query := `
+	SELECT 
+		l.card_id, l.timestamp
+	FROM access_logs l
+	INNER JOIN (
+		SELECT card_id, MAX(id) as max_id FROM access_logs GROUP BY card_id
+	) latest ON l.id = latest.max_id
+	WHERE l.event_type = 'entry'
+	`
+	rows, err := m.db.Query(query)
+	if err != nil {
+		return 0, err
+	}
+	defer rows.Close()
+
+	type insideEntry struct {
+		cardID    string
+		entryTime time.Time
+	}
+	var targets []insideEntry
+
+	for rows.Next() {
+		var cardID, tsStr string
+		if err := rows.Scan(&cardID, &tsStr); err != nil {
+			return 0, err
+		}
+		t, _ := time.Parse(time.RFC3339, tsStr)
+		if t.IsZero() {
+			t, _ = time.Parse("2006-01-02 15:04:05", tsStr)
+		}
+		targets = append(targets, insideEntry{cardID: cardID, entryTime: t})
+	}
+
+	if len(targets) == 0 {
+		return 0, nil
+	}
+
+	tx, err := m.db.Begin()
+	if err != nil {
+		return 0, err
+	}
+	defer tx.Rollback()
+
+	insertStmt, err := tx.Prepare(`INSERT INTO access_logs (card_id, event_type, timestamp, duration_second) VALUES (?, 'force_exit', ?, ?)`)
+	if err != nil {
+		return 0, err
+	}
+	defer insertStmt.Close()
+
+	for _, item := range targets {
+		durationSec := int64(exitTime.Sub(item.entryTime).Seconds())
+		if durationSec < 0 {
+			durationSec = 0
+		}
+		_, err := insertStmt.Exec(item.cardID, exitTime.Format(time.RFC3339), durationSec)
+		if err != nil {
+			return 0, err
+		}
+	}
+
+	if err := tx.Commit(); err != nil {
+		return 0, err
+	}
+
+	return len(targets), nil
+}
+
 // GetRecentLogs 直近の打刻ログ一覧取得 (limit件)
 func (m *DBManager) GetRecentLogs(limit int) ([]AccessLog, error) {
 	m.mu.RLock()
@@ -306,6 +533,7 @@ func (m *DBManager) GetRecentLogs(limit int) ([]AccessLog, error) {
 	query := `
 	SELECT 
 		l.id, l.card_id, u.name, u.role_name, u.role_code, u.student_no,
+		COALESCE(u.purpose, '') as purpose,
 		l.event_type, l.timestamp, l.duration_second
 	FROM access_logs l
 	LEFT JOIN registered_users u ON l.card_id = u.card_id
@@ -322,21 +550,22 @@ func (m *DBManager) GetRecentLogs(limit int) ([]AccessLog, error) {
 	for rows.Next() {
 		var l AccessLog
 		var tsStr string
-		var name, roleName, studentNo sql.NullString
+		var name, roleName, studentNo, purpose sql.NullString
 		var roleCode sql.NullInt64
 
-		if err := rows.Scan(&l.ID, &l.CardID, &name, &roleName, &roleCode, &studentNo, &l.EventType, &tsStr, &l.DurationSecond); err != nil {
+		if err := rows.Scan(&l.ID, &l.CardID, &name, &roleName, &roleCode, &studentNo, &purpose, &l.EventType, &tsStr, &l.DurationSecond); err != nil {
 			return nil, err
 		}
 		l.UserName = name.String
 		l.RoleName = roleName.String
 		l.RoleCode = int(roleCode.Int64)
 		l.StudentNo = studentNo.String
+		l.Purpose = purpose.String
 		l.Timestamp, _ = time.Parse(time.RFC3339, tsStr)
 		if l.Timestamp.IsZero() {
 			l.Timestamp, _ = time.Parse("2006-01-02 15:04:05", tsStr)
 		}
-		if l.EventType == "exit" && l.DurationSecond > 0 {
+		if (l.EventType == "exit" || l.EventType == "force_exit") && l.DurationSecond > 0 {
 			l.DurationText = FormatDuration(l.DurationSecond)
 		}
 		logs = append(logs, l)
@@ -361,29 +590,183 @@ func (m *DBManager) GetDashboardStats() (*DashboardStats, error) {
 	todayStart := time.Now().Format("2006-01-02") + "T00:00:00"
 	err = m.db.QueryRow("SELECT COUNT(*) FROM access_logs WHERE timestamp >= ?", todayStart).Scan(&stats.TodayLogCount)
 	if err != nil {
-		// 日付フォーマット差異のフォールバック
 		todayDate := time.Now().Format("2006-01-02")
 		_ = m.db.QueryRow("SELECT COUNT(*) FROM access_logs WHERE timestamp LIKE ?", todayDate+"%").Scan(&stats.TodayLogCount)
 	}
 
-	// 3. 現在の在室者数 (各カードの最新ログが 'entry' である件数)
+	// 3. 現在の在室者数 (本日00:00以降にentryし、最新ログが 'entry' である件数)
+	todayPrefix := time.Now().Format("2006-01-02")
 	queryInside := `
 	SELECT COUNT(*) FROM (
-		SELECT card_id, event_type FROM access_logs
-		WHERE id IN (
-			SELECT MAX(id) FROM access_logs GROUP BY card_id
-		) AND event_type = 'entry'
+		SELECT l.card_id, l.event_type FROM access_logs l
+		INNER JOIN (
+			SELECT card_id, MAX(id) as max_id FROM access_logs GROUP BY card_id
+		) latest ON l.id = latest.max_id
+		WHERE l.event_type = 'entry'
+		  AND (l.timestamp >= ? OR l.timestamp >= ? OR l.timestamp LIKE ?)
 	)
 	`
-	_ = m.db.QueryRow(queryInside).Scan(&stats.CurrentInsideCount)
+	_ = m.db.QueryRow(queryInside, todayStart, todayPrefix+" 00:00:00", todayPrefix+"%").Scan(&stats.CurrentInsideCount)
+
+	// 4. 週間の入退室数 (直近7日間)
+	sevenDaysAgo := time.Now().AddDate(0, 0, -6).Format("2006-01-02")
+	_ = m.db.QueryRow("SELECT COUNT(*) FROM access_logs WHERE timestamp >= ?", sevenDaysAgo).Scan(&stats.WeekLogCount)
+
+	// 5. 月間の入退室数 (当月1日以降)
+	monthStart := time.Now().Format("2006-01") + "-01"
+	_ = m.db.QueryRow("SELECT COUNT(*) FROM access_logs WHERE timestamp >= ?", monthStart).Scan(&stats.MonthLogCount)
+
+	// 6. 年間の入退室数 (今年度4月1日以降)
+	now := time.Now()
+	fyYear := now.Year()
+	if now.Month() < 4 {
+		fyYear--
+	}
+	fyStart := fmt.Sprintf("%d-04-01", fyYear)
+	_ = m.db.QueryRow("SELECT COUNT(*) FROM access_logs WHERE timestamp >= ?", fyStart).Scan(&stats.YearLogCount)
 
 	return stats, nil
 }
 
-// GetCurrentInsideUsers 現在在室中のユーザー一覧
+// GetMonthlyStats 月別・区分別打刻統計データの取得 (年月, -, 0教職員, 1学生, 9スタッフ, 当月までの合計)
+func (m *DBManager) GetMonthlyStats() (*MonthlyStatsResponse, error) {
+	m.mu.RLock()
+	defer m.mu.RUnlock()
+
+	query := `
+	SELECT 
+		substr(l.timestamp, 1, 7) AS ym,
+		COALESCE(u.role_code, -1) AS role_code,
+		COUNT(*) AS cnt
+	FROM access_logs l
+	LEFT JOIN registered_users u ON l.card_id = u.card_id
+	WHERE l.event_type = 'entry'
+	GROUP BY ym, role_code
+	ORDER BY ym ASC
+	`
+	rows, err := m.db.Query(query)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+
+	type monthGroup struct {
+		yearMonth string
+		roleOther int
+		role0     int
+		role1     int
+		role9     int
+	}
+
+	monthMap := make(map[string]*monthGroup)
+	var orderedYM []string
+
+	for rows.Next() {
+		var ym string
+		var roleCode, cnt int
+		if err := rows.Scan(&ym, &roleCode, &cnt); err != nil {
+			return nil, err
+		}
+		if ym == "" {
+			continue
+		}
+		mg, exists := monthMap[ym]
+		if !exists {
+			mg = &monthGroup{yearMonth: ym}
+			monthMap[ym] = mg
+			orderedYM = append(orderedYM, ym)
+		}
+		switch roleCode {
+		case 0:
+			mg.role0 += cnt
+		case 1:
+			mg.role1 += cnt
+		case 9:
+			mg.role9 += cnt
+		default:
+			mg.roleOther += cnt
+		}
+	}
+
+	var resultRows []MonthlyStatRow
+	quarterTotals := make(map[string]int)
+
+	currentFiscalYear := -1
+	fyCumulative := 0
+
+	for _, ym := range orderedYM {
+		mg := monthMap[ym]
+		var year, month int
+		fmt.Sscanf(ym, "%d-%d", &year, &month)
+
+		fiscalYear := year
+		if month < 4 {
+			fiscalYear = year - 1
+		}
+
+		quarterPeriod := ""
+		if month >= 4 && month <= 6 {
+			quarterPeriod = "4月～6月"
+		} else if month >= 7 && month <= 9 {
+			quarterPeriod = "7月～9月"
+		} else if month >= 10 && month <= 12 {
+			quarterPeriod = "10月～12月"
+		} else {
+			quarterPeriod = "1月～3月"
+		}
+
+		if fiscalYear != currentFiscalYear {
+			currentFiscalYear = fiscalYear
+			fyCumulative = 0
+		}
+
+		monthlyTotal := mg.roleOther + mg.role0 + mg.role1 + mg.role9
+		fyCumulative += monthlyTotal
+
+		qKey := fmt.Sprintf("%d_%s", fiscalYear, quarterPeriod)
+		quarterTotals[qKey] += monthlyTotal
+
+		resultRows = append(resultRows, MonthlyStatRow{
+			YearMonth:                 ym,
+			RoleOtherCount:            mg.roleOther,
+			Role0Count:                mg.role0,
+			Role1Count:                mg.role1,
+			Role9Count:                mg.role9,
+			MonthlyTotal:              monthlyTotal,
+			FiscalYear:                fiscalYear,
+			FiscalYearCumulativeTotal: fyCumulative,
+			QuarterPeriod:             quarterPeriod,
+			QuarterTotal:              0, // 2パス目で設定
+		})
+	}
+
+	// 四半期合計の反映
+	for i := range resultRows {
+		qKey := fmt.Sprintf("%d_%s", resultRows[i].FiscalYear, resultRows[i].QuarterPeriod)
+		resultRows[i].QuarterTotal = quarterTotals[qKey]
+	}
+
+	// 年月降順（新しい順）
+	for i, j := 0, len(resultRows)-1; i < j; i, j = i+1, j-1 {
+		resultRows[i], resultRows[j] = resultRows[j], resultRows[i]
+	}
+
+	if resultRows == nil {
+		resultRows = []MonthlyStatRow{}
+	}
+
+	return &MonthlyStatsResponse{
+		Rows: resultRows,
+	}, nil
+}
+
+// GetCurrentInsideUsers 現在在室中のユーザー一覧 (本日00:00以降にentryした利用者を対象)
 func (m *DBManager) GetCurrentInsideUsers() ([]UserStatus, error) {
 	m.mu.RLock()
 	defer m.mu.RUnlock()
+
+	todayPrefix := time.Now().Format("2006-01-02")
+	todayStart := todayPrefix + "T00:00:00"
 
 	query := `
 	SELECT 
@@ -394,9 +777,10 @@ func (m *DBManager) GetCurrentInsideUsers() ([]UserStatus, error) {
 	) latest ON l.id = latest.max_id
 	LEFT JOIN registered_users u ON l.card_id = u.card_id
 	WHERE l.event_type = 'entry'
+	  AND (l.timestamp >= ? OR l.timestamp >= ? OR l.timestamp LIKE ?)
 	ORDER BY l.timestamp DESC
 	`
-	rows, err := m.db.Query(query)
+	rows, err := m.db.Query(query, todayStart, todayPrefix+" 00:00:00", todayPrefix+"%")
 	if err != nil {
 		return nil, err
 	}
@@ -449,8 +833,9 @@ func (m *DBManager) GetFiscalYearLogs(fiscalYear int) ([]AccessLog, error) {
 	SELECT 
 		l.id, l.card_id, COALESCE(u.name, '未登録') as user_name,
 		COALESCE(u.role_name, '未登録') as role_name,
-		COALESCE(u.role_code, 0) as role_code,
+		COALESCE(u.role_code, 1) as role_code,
 		COALESCE(u.student_no, '') as student_no,
+		COALESCE(u.purpose, '') as purpose,
 		l.event_type, l.timestamp, l.duration_second
 	FROM access_logs l
 	LEFT JOIN registered_users u ON l.card_id = u.card_id
@@ -467,14 +852,14 @@ func (m *DBManager) GetFiscalYearLogs(fiscalYear int) ([]AccessLog, error) {
 	for rows.Next() {
 		var l AccessLog
 		var tsStr string
-		if err := rows.Scan(&l.ID, &l.CardID, &l.UserName, &l.RoleName, &l.RoleCode, &l.StudentNo, &l.EventType, &tsStr, &l.DurationSecond); err != nil {
+		if err := rows.Scan(&l.ID, &l.CardID, &l.UserName, &l.RoleName, &l.RoleCode, &l.StudentNo, &l.Purpose, &l.EventType, &tsStr, &l.DurationSecond); err != nil {
 			return nil, err
 		}
 		l.Timestamp, _ = time.Parse(time.RFC3339, tsStr)
 		if l.Timestamp.IsZero() {
 			l.Timestamp, _ = time.Parse("2006-01-02 15:04:05", tsStr)
 		}
-		if l.EventType == "exit" && l.DurationSecond > 0 {
+		if (l.EventType == "exit" || l.EventType == "force_exit") && l.DurationSecond > 0 {
 			l.DurationText = FormatDuration(l.DurationSecond)
 		}
 		logs = append(logs, l)

@@ -28,7 +28,7 @@ type App struct {
 // NewApp creates a new App application struct
 func NewApp() *App {
 	return &App{
-		adminPin: "1234", // 管理者PINコード
+		adminPin: "8202",
 	}
 }
 
@@ -50,8 +50,9 @@ func (a *App) startup(ctx context.Context) {
 	}
 	a.dbManager = dbMgr
 
-	// ゲートサービス初期化
+	// ゲートサービス初期化 & 23:00強制退室スケジューラ開始
 	a.gateService = service.NewGateService(dbMgr)
+	a.gateService.StartScheduler()
 
 	// NFC PaSoRi リーダーの監視開始
 	a.nfcReader = nfc.NewNFCReader(func(cardID string) {
@@ -65,7 +66,7 @@ func (a *App) startup(ctx context.Context) {
 	a.nfcReader.Start()
 
 	// LAN向けWeb管理者サーバーの起動 (ポート 8080)
-	a.httpServer = server.NewHTTPServer(a.dbManager, a.gateService, 8080, a.adminPin)
+	a.httpServer = server.NewHTTPServer(a.dbManager, a.gateService, 8080, a.adminPin, assets)
 	a.httpServer.Start()
 }
 
@@ -80,6 +81,9 @@ func (a *App) beforeClose(ctx context.Context) (prevent bool) {
 
 // shutdown is called at application termination
 func (a *App) shutdown(ctx context.Context) {
+	if a.gateService != nil {
+		a.gateService.StopScheduler()
+	}
 	if a.nfcReader != nil {
 		a.nfcReader.Stop()
 	}
@@ -108,6 +112,11 @@ func (a *App) VerifyPIN(pin string) bool {
 // GetDashboardStats ダッシュボード統計データの取得
 func (a *App) GetDashboardStats() (*db.DashboardStats, error) {
 	return a.dbManager.GetDashboardStats()
+}
+
+// GetMonthlyStats 月別・区分別統計データの取得 (01prompt, 19prompt要件)
+func (a *App) GetMonthlyStats() (*db.MonthlyStatsResponse, error) {
+	return a.dbManager.GetMonthlyStats()
 }
 
 // GetAllUsers 登録ユーザー一覧の取得
@@ -143,6 +152,11 @@ func (a *App) ClearAllLogs() error {
 	return a.dbManager.ClearAllLogs()
 }
 
+// ForceExitAllInside 在室中の全利用者を即時一括強制退室（高度な操作）
+func (a *App) ForceExitAllInside() (int, error) {
+	return a.gateService.ForceExitAllInside()
+}
+
 // ExportFiscalYearLogsCSV 指定年度のCSVデータを生成して保存ダイアログを表示
 func (a *App) ExportFiscalYearLogsCSV(fiscalYear int) (string, error) {
 	csvData, err := a.gateService.GenerateFiscalYearCSV(fiscalYear)
@@ -170,4 +184,73 @@ func (a *App) ExportFiscalYearLogsCSV(fiscalYear int) (string, error) {
 	}
 
 	return savePath, nil
+}
+
+// ImportUsersCSV 利用者マスターCSVファイルの選択・インポート
+func (a *App) ImportUsersCSV() (string, error) {
+	filePath, err := runtime.OpenFileDialog(a.ctx, runtime.OpenDialogOptions{
+		Title: "利用者登録CSVファイルの選択",
+		Filters: []runtime.FileFilter{
+			{DisplayName: "CSV Files (*.csv)", Pattern: "*.csv"},
+		},
+	})
+	if err != nil {
+		return "", err
+	}
+	if filePath == "" {
+		return "", nil // キャンセル
+	}
+
+	data, err := os.ReadFile(filePath)
+	if err != nil {
+		return "", fmt.Errorf("ファイルの読み込みに失敗しました: %w", err)
+	}
+
+	imported, total, err := a.gateService.ImportUsersCSV(data)
+	if err != nil {
+		return "", fmt.Errorf("インポート中にエラーが発生しました: %w", err)
+	}
+
+	return fmt.Sprintf("利用者CSVのインポートが完了しました（%d 件登録 / 対象 %d 件）", imported, total), nil
+}
+
+// ImportLogsCSV 入退室ログCSVファイルの選択・インポート
+func (a *App) ImportLogsCSV() (string, error) {
+	filePath, err := runtime.OpenFileDialog(a.ctx, runtime.OpenDialogOptions{
+		Title: "入退室ログCSVファイルの選択",
+		Filters: []runtime.FileFilter{
+			{DisplayName: "CSV Files (*.csv)", Pattern: "*.csv"},
+		},
+	})
+	if err != nil {
+		return "", err
+	}
+	if filePath == "" {
+		return "", nil // キャンセル
+	}
+
+	data, err := os.ReadFile(filePath)
+	if err != nil {
+		return "", fmt.Errorf("ファイルの読み込みに失敗しました: %w", err)
+	}
+
+	imported, total, err := a.gateService.ImportLogsCSV(data)
+	if err != nil {
+		return "", fmt.Errorf("インポート中にエラーが発生しました: %w", err)
+	}
+
+	return fmt.Sprintf("入退室ログCSVのインポートが完了しました（%d 件インポート / 対象 %d 件）", imported, total), nil
+}
+
+// ToggleFullscreen フルスクリーン表示の切り替え
+func (a *App) ToggleFullscreen() bool {
+	if a.ctx == nil {
+		return false
+	}
+	if runtime.WindowIsFullscreen(a.ctx) {
+		runtime.WindowUnfullscreen(a.ctx)
+		return false
+	}
+	runtime.WindowFullscreen(a.ctx)
+	return true
 }

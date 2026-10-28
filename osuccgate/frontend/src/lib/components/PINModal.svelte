@@ -1,12 +1,18 @@
 <script>
-  import { VerifyPIN } from '../../../wailsjs/go/main/App.js';
+  import { onMount, tick } from 'svelte';
+  import { VerifyPIN } from '../adminApi.js';
 
   export let onSuccess = () => {};
   export let onCancel = () => {};
 
   let pin = '';
+  let pinInput;
   let errorMessage = '';
   let isChecking = false;
+
+  onMount(() => {
+    tick().then(() => pinInput?.focus());
+  });
 
   async function handleSubmit() {
     if (!pin) {
@@ -48,7 +54,7 @@
     </div>
     
     <h2 class="text-2xl font-bold text-white mb-2">管理者認証</h2>
-    <p class="text-slate-400 text-sm mb-6">4桁の管理者PINコードを入力してください (初期値: 1234)</p>
+    <p class="text-slate-400 text-sm mb-6">4桁の管理者PINコードを入力してください</p>
 
     {#if errorMessage}
       <div class="bg-rose-950/60 border border-rose-800 text-rose-300 text-xs py-2 px-3 rounded-xl mb-4">
@@ -59,12 +65,12 @@
     <div class="mb-6">
       <input 
         type="password" 
+        bind:this={pinInput}
         bind:value={pin} 
         on:keydown={handleKeydown}
         maxlength="8" 
         placeholder="••••" 
         class="w-full text-center text-3xl tracking-widest bg-slate-800 border border-slate-700 text-white rounded-2xl py-3 px-4 focus:outline-none focus:border-blue-500 transition shadow-inner font-mono"
-        autofocus
       />
     </div>
 

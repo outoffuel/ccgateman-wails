@@ -87,6 +87,16 @@ export const sounds = {
     playTone(150, 'sawtooth', 0.30, 0.25, 0.3);
   },
 
+  // 通過音（互換性エイリアス）
+  pass() {
+    this.studentEntry();
+  },
+
+  // エラー音（互換性エイリアス）
+  error() {
+    this.booboo();
+  },
+
   // サウンドタイプ名に応じた再生ディスパッチャ
   play(soundType) {
     switch (soundType) {
@@ -102,7 +112,12 @@ export const sounds = {
       case 'staffExit':
         this.staffExit();
         break;
+      case 'pass':
+      case 'success':
+        this.pass();
+        break;
       case 'booboo':
+      case 'error':
       default:
         this.booboo();
         break;
