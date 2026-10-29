@@ -1,0 +1,1 @@
+pushがあったらgithub actionsを利用してwails buildを実行しリリースにwindows,linux用のバイナリを設置するようにできますか

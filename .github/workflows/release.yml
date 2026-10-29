@@ -1,0 +1,93 @@
+name: Build and Release
+
+on:
+  push:
+    branches:
+      - master
+    tags:
+      - "v*"
+
+permissions:
+  contents: write
+
+jobs:
+  build:
+    name: Build ${{ matrix.platform }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - runner: windows-latest
+            platform: windows/amd64
+            artifact: osuccgate-windows-amd64.exe
+          - runner: ubuntu-22.04
+            platform: linux/amd64
+            artifact: osuccgate-linux-amd64.tar.gz
+
+    runs-on: ${{ matrix.runner }}
+    steps:
+      - name: Check out source
+        uses: actions/checkout@v4
+
+      - name: Install Linux build dependencies
+        if: runner.os == 'Linux'
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y build-essential pkg-config libgtk-3-dev libwebkit2gtk-4.0-dev
+
+      - name: Set up Go
+        uses: actions/setup-go@v5
+        with:
+          go-version-file: osuccgate/go.mod
+          cache-dependency-path: osuccgate/go.sum
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 20
+
+      - name: Install Wails CLI
+        run: go install github.com/wailsapp/wails/v2/cmd/wails@v2.17.0
+
+      - name: Build application
+        working-directory: osuccgate
+        run: wails build --clean --platform ${{ matrix.platform }}
+
+      - name: Package Linux binary
+        if: runner.os == 'Linux'
+        run: tar -czf ${{ matrix.artifact }} -C osuccgate/build/bin osuccgate
+
+      - name: Package Windows binary
+        if: runner.os == 'Windows'
+        shell: pwsh
+        run: Copy-Item osuccgate/build/bin/osuccgate.exe ${{ matrix.artifact }}
+
+      - name: Upload build artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: osuccgate-${{ matrix.platform }}
+          path: ${{ matrix.artifact }}
+          if-no-files-found: error
+          retention-days: 14
+
+  release:
+    name: Publish GitHub Release
+    if: github.ref == 'refs/heads/master' || startsWith(github.ref, 'refs/tags/v')
+    needs: build
+    runs-on: ubuntu-latest
+    steps:
+      - name: Download platform binaries
+        uses: actions/download-artifact@v4
+        with:
+          path: release-assets
+          merge-multiple: true
+
+      - name: Create release and upload binaries
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: ${{ github.ref == 'refs/heads/master' && 'latest' || github.ref_name }}
+          name: ${{ github.ref == 'refs/heads/master' && 'Latest master build' || github.ref_name }}
+          prerelease: ${{ github.ref == 'refs/heads/master' }}
+          update_tag: ${{ github.ref == 'refs/heads/master' }}
+          generate_release_notes: true
+          files: release-assets/*
