@@ -40,3 +40,4 @@ go.work
 
 # User added manualy
 *.db
+osuccgate/build/bin
