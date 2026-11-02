@@ -1289,7 +1289,7 @@
                 全 {filteredLogs.length} 件中 {filteredLogs.length > 0 ? (logCurrentPage - 1) * LOGS_PER_PAGE + 1 : 0} ～ {Math.min(logCurrentPage * LOGS_PER_PAGE, filteredLogs.length)} 件を表示
                 </div>
               {#if totalLogPages > 1}
-                <div class="min-w-0 max-w-full justify-self-center">
+                <div class="min-w-0 max-w-full justify-self-center flex flex-wrap items-center justify-center gap-3">
                   <nav aria-label="入退室履歴のページ" class="flex max-w-full flex-wrap items-center justify-center gap-1 text-xs">
                   <button 
                     disabled={logCurrentPage === 1}
@@ -1319,7 +1319,7 @@
                     class="h-8 w-8 rounded border border-slate-300 hover:bg-slate-50 disabled:text-slate-300 disabled:cursor-not-allowed"
                   >›</button>
                   </nav>
-                  <form class="mt-2 flex items-center justify-center gap-2 text-xs" on:submit|preventDefault={() => setLogPage(logPageInput)}>
+                  <form class="flex items-center justify-center gap-2 text-xs" on:submit|preventDefault={() => setLogPage(logPageInput)}>
                     <label for="log-page-input" class="text-slate-600">ページへ移動</label>
                     <input
                       id="log-page-input"
@@ -1691,7 +1691,7 @@
                   <span class="text-xs text-slate-500 font-medium text-center md:text-left">
                     全 {filteredUsers.length} 人 ({userCurrentPage} / {totalUserPages} ページ)
                   </span>
-                  <div class="min-w-0 max-w-full justify-self-center">
+                  <div class="min-w-0 max-w-full justify-self-center flex flex-wrap items-center justify-center gap-3">
                     <nav aria-label="ユーザー一覧のページ" class="flex max-w-full flex-wrap items-center justify-center gap-1 text-xs">
                       <button
                     disabled={userCurrentPage === 1}
@@ -1715,13 +1715,13 @@
                       {/each}
 
                       <button
-                    disabled={userCurrentPage === 1}
+                    disabled={userCurrentPage === totalUserPages}
                     aria-label="次のページ"
                     on:click={() => setUserPage(userCurrentPage + 1)}
                     class="h-8 w-8 rounded border border-slate-300 hover:bg-slate-50 disabled:text-slate-300 disabled:cursor-not-allowed"
                   >›</button>
                     </nav>
-                    <form class="mt-2 flex items-center justify-center gap-2 text-xs" on:submit|preventDefault={() => setUserPage(userPageInput)}>
+                    <form class="flex items-center justify-center gap-2 text-xs" on:submit|preventDefault={() => setUserPage(userPageInput)}>
                       <label for="user-page-input" class="text-slate-600">ページへ移動</label>
                       <input
                         id="user-page-input"
