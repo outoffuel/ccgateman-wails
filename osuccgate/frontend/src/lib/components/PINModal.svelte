@@ -11,7 +11,13 @@
   let isChecking = false;
 
   onMount(() => {
-    tick().then(() => pinInput?.focus());
+    tick().then(() => {
+      pinInput?.focus();
+    });
+    const timer = setTimeout(() => {
+      pinInput?.focus();
+    }, 50);
+    return () => clearTimeout(timer);
   });
 
   async function handleSubmit() {
@@ -47,8 +53,14 @@
   }
 </script>
 
-<div class="fixed inset-0 bg-slate-950/80 backdrop-blur-md flex items-center justify-center p-4 z-50 animate-fade">
-  <div class="bg-slate-900 border border-slate-700 rounded-3xl p-8 max-w-md w-full shadow-2xl text-center">
+<div 
+  class="fixed inset-0 bg-slate-950/80 backdrop-blur-md flex items-center justify-center p-4 z-50 animate-fade"
+  on:click|self={onCancel}
+>
+  <div 
+    class="bg-slate-900 border border-slate-700 rounded-3xl p-8 max-w-md w-full shadow-2xl text-center"
+    on:click|stopPropagation={() => pinInput?.focus()}
+  >
     <div class="w-16 h-16 bg-blue-600/20 text-blue-400 rounded-2xl flex items-center justify-center mx-auto mb-4 text-3xl shadow-inner">
       🔒
     </div>
@@ -70,6 +82,7 @@
         on:keydown={handleKeydown}
         maxlength="8" 
         placeholder="••••" 
+        autofocus
         class="w-full text-center text-3xl tracking-widest bg-slate-800 border border-slate-700 text-white rounded-2xl py-3 px-4 focus:outline-none focus:border-blue-500 transition shadow-inner font-mono"
       />
     </div>

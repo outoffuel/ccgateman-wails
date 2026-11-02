@@ -35,7 +35,7 @@
 
 <main class="w-full min-h-screen overflow-y-auto select-none bg-slate-950">
   {#if currentView === 'kiosk'}
-    <KioskSwipe onOpenAdmin={handleRequestOpenAdmin} />
+    <KioskSwipe onOpenAdmin={handleRequestOpenAdmin} isPaused={isPinModalOpen} />
   {:else if currentView === 'admin'}
     <AdminDashboard onBackToKiosk={handleBackToKiosk} />
   {/if}
