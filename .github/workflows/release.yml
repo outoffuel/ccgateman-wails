@@ -68,14 +68,15 @@ jobs:
       - name: Install Wails CLI
         run: go install github.com/wailsapp/wails/v2/cmd/wails@v2.17.0
 
-      - name: Build application
+      - name: Build application (Linux)
+        if: runner.os == 'Linux'
         working-directory: osuccgate
-        run: |
-          if [ "${{ runner.os }}" = "Linux" ]; then
-            wails build --clean --platform ${{ matrix.platform }} -tags webkit2_41 -ldflags "-X main.appVersion=${{ needs.version.outputs.app_version }}"
-          else
-            wails build --clean --platform ${{ matrix.platform }} -ldflags "-X main.appVersion=${{ needs.version.outputs.app_version }}"
-          fi
+        run: wails build --clean --platform ${{ matrix.platform }} -tags webkit2_41 -ldflags "-X main.appVersion=${{ needs.version.outputs.app_version }}"
+
+      - name: Build application (Windows)
+        if: runner.os == 'Windows'
+        working-directory: osuccgate
+        run: wails build --clean --platform ${{ matrix.platform }} -ldflags "-X main.appVersion=${{ needs.version.outputs.app_version }}"
 
       - name: Package Linux binary
         if: runner.os == 'Linux'
