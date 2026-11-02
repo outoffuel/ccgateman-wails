@@ -1,0 +1,1 @@
+さっき設定したactionsはmaster ブランチへのpush次に実行するようにして

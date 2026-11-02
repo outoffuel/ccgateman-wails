@@ -14,6 +14,34 @@
 
   export let onBackToKiosk = () => {};
 
+  function clampPage(page, totalPages) {
+    const parsedPage = Number.parseInt(String(page), 10);
+    if (!Number.isFinite(parsedPage)) return 1;
+    return Math.min(Math.max(parsedPage, 1), Math.max(totalPages, 1));
+  }
+
+  function getPageItems(totalPages, currentPage) {
+    const pages = [...new Set([
+      1,
+      2,
+      currentPage - 1,
+      currentPage,
+      currentPage + 1,
+      totalPages - 1,
+      totalPages
+    ].filter(page => page >= 1 && page <= totalPages))].sort((a, b) => a - b);
+
+    return pages.flatMap((page, index) => {
+      const previousPage = pages[index - 1];
+      const items = [];
+      if (previousPage && page - previousPage > 1) {
+        items.push({ type: 'ellipsis', key: `ellipsis-${previousPage}-${page}` });
+      }
+      items.push({ type: 'page', page, key: `page-${page}` });
+      return items;
+    });
+  }
+
   // 画面タブ ('dashboard' | 'logs' | 'inside' | 'users')
   let activeTab = 'dashboard';
 
@@ -364,6 +392,7 @@
   let filterRole = "all";   // 'all' | '学生' | '教職員' | '学生スタッフ'
   let filterKeyword = "";
   let logCurrentPage = 1;
+  let logPageInput = 1;
   const LOGS_PER_PAGE = 10;
 
   $: processedLogs = (logs || []).map(l => {
@@ -393,7 +422,14 @@
   });
 
   $: totalLogPages = Math.ceil(filteredLogs.length / LOGS_PER_PAGE) || 1;
+  $: logPageItems = getPageItems(totalLogPages, logCurrentPage);
+  $: if (logCurrentPage > totalLogPages) setLogPage(totalLogPages);
   $: paginatedLogs = filteredLogs.slice((logCurrentPage - 1) * LOGS_PER_PAGE, logCurrentPage * LOGS_PER_PAGE);
+
+  function setLogPage(page) {
+    logCurrentPage = clampPage(page, totalLogPages);
+    logPageInput = logCurrentPage;
+  }
 
   function clearLogFilters() {
     filterDateStart = "";
@@ -401,7 +437,7 @@
     filterType = "all";
     filterRole = "all";
     filterKeyword = "";
-    logCurrentPage = 1;
+    setLogPage(1);
   }
 
   function exportLogsCSV() {
@@ -439,6 +475,7 @@
   let userSearch = "";
   let userRoleFilter = "all"; // 'all' | '学生' | '教職員' | '学生スタッフ'
   let userCurrentPage = 1;
+  let userPageInput = 1;
   let usersPerPage = 25;
 
   // 個人情報（連絡先・電話番号）のマスク開示管理
@@ -480,11 +517,18 @@
 
   // ユーザー一覧のページネーション
   $: totalUserPages = Math.ceil(filteredUsers.length / usersPerPage) || 1;
+  $: userPageItems = getPageItems(totalUserPages, userCurrentPage);
+  $: if (userCurrentPage > totalUserPages) setUserPage(totalUserPages);
   $: paginatedUsers = filteredUsers.slice((userCurrentPage - 1) * usersPerPage, userCurrentPage * usersPerPage);
+
+  function setUserPage(page) {
+    userCurrentPage = clampPage(page, totalUserPages);
+    userPageInput = userCurrentPage;
+  }
 
   // 検索・絞り込み時にページネーションを1に戻す
   $: if (userSearch || userRoleFilter) {
-    userCurrentPage = 1;
+    setUserPage(1);
   }
 
   // ユーザー登録・編集モーダル (★03prompt & 04prompt準拠の並び順と仕様)
@@ -1114,7 +1158,7 @@
 
               <div class="lg:col-span-2 flex items-center gap-2">
                 <button 
-                  on:click={() => { logCurrentPage = 1; }}
+                  on:click={() => setLogPage(1)}
                   class="flex-1 py-2 bg-blue-600 hover:bg-blue-700 text-white rounded-lg text-xs font-bold transition shadow-xs"
                 >
                   検索
@@ -1239,34 +1283,60 @@
             </div>
 
             <!-- ページネーション -->
-            <div class="px-6 py-4 border-t border-slate-100 flex items-center justify-between">
-              <div class="text-xs text-slate-500">
+            <div class="px-4 sm:px-6 py-4 border-t border-slate-100">
+              <div class="grid grid-cols-1 md:grid-cols-[1fr_auto_1fr] items-center gap-3">
+                <div class="text-xs text-slate-500 text-center md:text-left">
                 全 {filteredLogs.length} 件中 {filteredLogs.length > 0 ? (logCurrentPage - 1) * LOGS_PER_PAGE + 1 : 0} ～ {Math.min(logCurrentPage * LOGS_PER_PAGE, filteredLogs.length)} 件を表示
-              </div>
+                </div>
               {#if totalLogPages > 1}
-                <div class="flex items-center gap-1.5 text-xs">
+                <div class="min-w-0 max-w-full justify-self-center flex flex-wrap items-center justify-center gap-3">
+                  <nav aria-label="入退室履歴のページ" class="flex max-w-full flex-wrap items-center justify-center gap-1 text-xs">
                   <button 
                     disabled={logCurrentPage === 1}
-                    on:click={() => logCurrentPage--}
-                    class="px-2.5 py-1 rounded border border-slate-300 hover:bg-slate-50 disabled:text-slate-300 disabled:cursor-not-allowed"
-                  >前へ</button>
+                    aria-label="前のページ"
+                    on:click={() => setLogPage(logCurrentPage - 1)}
+                    class="h-8 w-8 rounded border border-slate-300 hover:bg-slate-50 disabled:text-slate-300 disabled:cursor-not-allowed"
+                  >‹</button>
 
-                  {#each Array(totalLogPages) as _, i}
-                    <button 
-                      on:click={() => logCurrentPage = i + 1}
-                      class="px-3 py-1 rounded font-bold {logCurrentPage === i + 1 ? 'bg-blue-600 text-white' : 'border border-slate-200 hover:bg-slate-50 text-slate-700'}"
-                    >
-                      {i + 1}
-                    </button>
+                  {#each logPageItems as item (item.key)}
+                    {#if item.type === 'ellipsis'}
+                      <span aria-hidden="true" class="w-5 text-center text-slate-500">…</span>
+                    {:else}
+                      <button
+                        aria-current={logCurrentPage === item.page ? 'page' : undefined}
+                        on:click={() => setLogPage(item.page)}
+                        class="h-8 min-w-8 rounded px-1.5 font-bold {logCurrentPage === item.page ? 'bg-blue-600 text-white' : 'border border-slate-200 hover:bg-slate-50 text-slate-700'}"
+                      >
+                        {item.page}
+                      </button>
+                    {/if}
                   {/each}
 
                   <button 
                     disabled={logCurrentPage === totalLogPages}
-                    on:click={() => logCurrentPage++}
-                    class="px-2.5 py-1 rounded border border-slate-300 hover:bg-slate-50 disabled:text-slate-300 disabled:cursor-not-allowed"
-                  >次へ</button>
+                    aria-label="次のページ"
+                    on:click={() => setLogPage(logCurrentPage + 1)}
+                    class="h-8 w-8 rounded border border-slate-300 hover:bg-slate-50 disabled:text-slate-300 disabled:cursor-not-allowed"
+                  >›</button>
+                  </nav>
+                  <form class="flex items-center justify-center gap-2 text-xs" on:submit|preventDefault={() => setLogPage(logPageInput)}>
+                    <label for="log-page-input" class="text-slate-600">ページへ移動</label>
+                    <input
+                      id="log-page-input"
+                      type="number"
+                      min="1"
+                      max={totalLogPages}
+                      bind:value={logPageInput}
+                      on:change={(event) => setLogPage(event.currentTarget.value)}
+                      class="h-8 w-16 rounded border border-slate-300 text-center text-xs focus:outline-none focus:ring-2 focus:ring-blue-500/20"
+                    />
+                    <span class="text-slate-500">/ {totalLogPages}</span>
+                    <button type="submit" class="h-8 rounded border border-slate-300 px-2 font-semibold text-slate-700 hover:bg-slate-50">移動</button>
+                  </form>
                 </div>
               {/if}
+                <div class="hidden md:block"></div>
+              </div>
             </div>
           </div>
         </div>
@@ -1381,7 +1451,7 @@
               <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                 <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 6v6m0 0v6m0-6h6m-6 0H6"/>
               </svg>
-              ＋ 新規登録
+              新規登録
             </button>
           </div>
 
@@ -1616,34 +1686,57 @@
 
             <!-- ユーザー管理 ページネーションバー -->
             {#if totalUserPages > 1}
-              <div class="px-6 py-3.5 border-t border-slate-100 flex items-center justify-between bg-slate-50/30">
-                <span class="text-xs text-slate-500 font-medium">
-                  {userCurrentPage} / {totalUserPages} ページ (全 {filteredUsers.length} 人)
-                </span>
-                <div class="flex items-center gap-1.5">
-                  <button 
+              <div class="px-4 sm:px-6 py-3.5 border-t border-slate-100 bg-slate-50/30">
+                <div class="grid grid-cols-1 md:grid-cols-[1fr_auto_1fr] items-center gap-3">
+                  <span class="text-xs text-slate-500 font-medium text-center md:text-left">
+                    全 {filteredUsers.length} 人 ({userCurrentPage} / {totalUserPages} ページ)
+                  </span>
+                  <div class="min-w-0 max-w-full justify-self-center flex flex-wrap items-center justify-center gap-3">
+                    <nav aria-label="ユーザー一覧のページ" class="flex max-w-full flex-wrap items-center justify-center gap-1 text-xs">
+                      <button
                     disabled={userCurrentPage === 1}
-                    on:click={() => userCurrentPage = 1}
-                    class="px-2.5 py-1 text-xs border border-slate-200 rounded hover:bg-slate-50 disabled:opacity-40 disabled:cursor-not-allowed font-medium text-slate-600"
-                  >最初</button>
-                  <button 
-                    disabled={userCurrentPage === 1}
-                    on:click={() => userCurrentPage--}
-                    class="px-2.5 py-1 text-xs border border-slate-200 rounded hover:bg-slate-50 disabled:opacity-40 disabled:cursor-not-allowed font-medium text-slate-600"
-                  >前へ</button>
+                    aria-label="前のページ"
+                    on:click={() => setUserPage(userCurrentPage - 1)}
+                    class="h-8 w-8 rounded border border-slate-300 hover:bg-slate-50 disabled:text-slate-300 disabled:cursor-not-allowed"
+                  >‹</button>
 
-                  <span class="px-2 text-xs font-bold text-slate-700">{userCurrentPage}</span>
+                      {#each userPageItems as item (item.key)}
+                        {#if item.type === 'ellipsis'}
+                          <span aria-hidden="true" class="w-5 text-center text-slate-500">…</span>
+                        {:else}
+                          <button
+                            aria-current={userCurrentPage === item.page ? 'page' : undefined}
+                            on:click={() => setUserPage(item.page)}
+                            class="h-8 min-w-8 rounded px-1.5 font-bold {userCurrentPage === item.page ? 'bg-blue-600 text-white' : 'border border-slate-200 hover:bg-slate-50 text-slate-700'}"
+                          >
+                            {item.page}
+                          </button>
+                        {/if}
+                      {/each}
 
-                  <button 
+                      <button
                     disabled={userCurrentPage === totalUserPages}
-                    on:click={() => userCurrentPage++}
-                    class="px-2.5 py-1 text-xs border border-slate-200 rounded hover:bg-slate-50 disabled:opacity-40 disabled:cursor-not-allowed font-medium text-slate-600"
-                  >次へ</button>
-                  <button 
-                    disabled={userCurrentPage === totalUserPages}
-                    on:click={() => userCurrentPage = totalUserPages}
-                    class="px-2.5 py-1 text-xs border border-slate-200 rounded hover:bg-slate-50 disabled:opacity-40 disabled:cursor-not-allowed font-medium text-slate-600"
-                  >最後</button>
+                    aria-label="次のページ"
+                    on:click={() => setUserPage(userCurrentPage + 1)}
+                    class="h-8 w-8 rounded border border-slate-300 hover:bg-slate-50 disabled:text-slate-300 disabled:cursor-not-allowed"
+                  >›</button>
+                    </nav>
+                    <form class="flex items-center justify-center gap-2 text-xs" on:submit|preventDefault={() => setUserPage(userPageInput)}>
+                      <label for="user-page-input" class="text-slate-600">ページへ移動</label>
+                      <input
+                        id="user-page-input"
+                        type="number"
+                        min="1"
+                        max={totalUserPages}
+                        bind:value={userPageInput}
+                        on:change={(event) => setUserPage(event.currentTarget.value)}
+                        class="h-8 w-16 rounded border border-slate-300 text-center text-xs focus:outline-none focus:ring-2 focus:ring-blue-500/20"
+                      />
+                      <span class="text-slate-500">/ {totalUserPages}</span>
+                      <button type="submit" class="h-8 rounded border border-slate-300 px-2 font-semibold text-slate-700 hover:bg-slate-50">移動</button>
+                    </form>
+                  </div>
+                  <div class="hidden md:block"></div>
                 </div>
               </div>
             {/if}
