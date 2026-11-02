@@ -272,3 +272,34 @@ export namespace service {
 
 }
 
+export namespace updater {
+	
+	export class ReleaseInfo {
+	    version: string;
+	    currentVersion: string;
+	    hasUpdate: boolean;
+	    releaseUrl: string;
+	    releaseName: string;
+	    publishedAt: string;
+	    assetUrl?: string;
+	    assetName?: string;
+	
+	    static createFrom(source: any = {}) {
+	        return new ReleaseInfo(source);
+	    }
+	
+	    constructor(source: any = {}) {
+	        if ('string' === typeof source) source = JSON.parse(source);
+	        this.version = source["version"];
+	        this.currentVersion = source["currentVersion"];
+	        this.hasUpdate = source["hasUpdate"];
+	        this.releaseUrl = source["releaseUrl"];
+	        this.releaseName = source["releaseName"];
+	        this.publishedAt = source["publishedAt"];
+	        this.assetUrl = source["assetUrl"];
+	        this.assetName = source["assetName"];
+	    }
+	}
+
+}
+

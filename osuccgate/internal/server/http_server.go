@@ -10,6 +10,7 @@ import (
 	"net/http"
 	"osuccgate/internal/db"
 	"osuccgate/internal/service"
+	"osuccgate/internal/updater"
 	"strconv"
 	"strings"
 	"time"
@@ -19,22 +20,29 @@ type HTTPServer struct {
 	server      *http.Server
 	dbManager   *db.DBManager
 	gateService *service.GateService
+	updater     *updater.Updater
 	adminPin    string
+	appVersion  string
 	port        int
 	webAssets   fs.FS
 }
 
-func NewHTTPServer(dbMgr *db.DBManager, gateSvc *service.GateService, port int, pin string, webAssets fs.FS) *HTTPServer {
+func NewHTTPServer(dbMgr *db.DBManager, gateSvc *service.GateService, port int, pin string, webAssets fs.FS, upd *updater.Updater, version string) *HTTPServer {
 	if pin == "" {
 		pin = "8202"
 	}
 	if port <= 0 {
 		port = 8080
 	}
+	if version == "" {
+		version = "dev"
+	}
 	return &HTTPServer{
 		dbManager:   dbMgr,
 		gateService: gateSvc,
+		updater:     upd,
 		adminPin:    pin,
+		appVersion:  version,
 		port:        port,
 		webAssets:   webAssets,
 	}
@@ -68,6 +76,10 @@ func (s *HTTPServer) Start() {
 	handleWithCORS("/api/export/csv", s.handleExportCSV)
 	handleWithCORS("/api/import/users", s.handleImportUsers)
 	handleWithCORS("/api/import/logs", s.handleImportLogs)
+	handleWithCORS("/api/version", s.handleGetVersion)
+	handleWithCORS("/api/system/update-status", s.handleGetVersion)
+	handleWithCORS("/api/system/check-update", s.handleCheckUpdate)
+	handleWithCORS("/api/system/apply-update", s.handleApplyUpdate)
 
 	// Web管理者画面 SPA
 	mux.HandleFunc("/", s.handleWebAdminSPA)
@@ -374,6 +386,12 @@ func writeImportResponse(w http.ResponseWriter, imported, total int, err error, 
 	})
 }
 
+func (s *HTTPServer) jsonResponse(w http.ResponseWriter, status int, data interface{}) {
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(status)
+	_ = json.NewEncoder(w).Encode(data)
+}
+
 func (s *HTTPServer) handleWebAdminSPA(w http.ResponseWriter, r *http.Request) {
 	distFS, err := fs.Sub(s.webAssets, "frontend/dist")
 	if err != nil {
@@ -381,4 +399,81 @@ func (s *HTTPServer) handleWebAdminSPA(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	http.FileServer(http.FS(distFS)).ServeHTTP(w, r)
+}
+
+func (s *HTTPServer) handleGetVersion(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodGet {
+		http.Error(w, "Method Not Allowed", http.StatusMethodNotAllowed)
+		return
+	}
+	s.jsonResponse(w, http.StatusOK, map[string]string{
+		"version": s.appVersion,
+	})
+}
+
+func (s *HTTPServer) handleCheckUpdate(w http.ResponseWriter, r *http.Request) {
+	if !s.checkPIN(r) {
+		http.Error(w, "Unauthorized: Invalid PIN", http.StatusUnauthorized)
+		return
+	}
+	if s.updater == nil {
+		s.jsonResponse(w, http.StatusServiceUnavailable, map[string]string{
+			"error": "Updater is not configured",
+		})
+		return
+	}
+	ctx, cancel := context.WithTimeout(r.Context(), 30*time.Second)
+	defer cancel()
+
+	info, err := s.updater.CheckForUpdate(ctx)
+	if err != nil {
+		s.jsonResponse(w, http.StatusInternalServerError, map[string]string{
+			"error": err.Error(),
+		})
+		return
+	}
+	s.jsonResponse(w, http.StatusOK, info)
+}
+
+func (s *HTTPServer) handleApplyUpdate(w http.ResponseWriter, r *http.Request) {
+	if !s.checkPIN(r) {
+		http.Error(w, "Unauthorized: Invalid PIN", http.StatusUnauthorized)
+		return
+	}
+	if s.updater == nil {
+		s.jsonResponse(w, http.StatusServiceUnavailable, map[string]string{
+			"error": "Updater is not configured",
+		})
+		return
+	}
+
+	checkCtx, checkCancel := context.WithTimeout(context.Background(), 30*time.Second)
+	defer checkCancel()
+
+	info, err := s.updater.CheckForUpdate(checkCtx)
+	if err != nil {
+		s.jsonResponse(w, http.StatusInternalServerError, map[string]string{
+			"error": fmt.Sprintf("Failed to check release: %v", err),
+		})
+		return
+	}
+	if !info.HasUpdate || info.AssetURL == "" {
+		s.jsonResponse(w, http.StatusBadRequest, map[string]string{
+			"error": "No update asset available for this system",
+		})
+		return
+	}
+
+	s.jsonResponse(w, http.StatusOK, map[string]string{
+		"message": "Update started. The application will restart automatically.",
+	})
+
+	go func() {
+		time.Sleep(500 * time.Millisecond)
+		updateCtx, updateCancel := context.WithTimeout(context.Background(), 3*time.Minute)
+		defer updateCancel()
+		if err := s.updater.ApplyUpdate(updateCtx, info); err != nil {
+			log.Printf("[HTTP Server] Error applying update: %v", err)
+		}
+	}()
 }

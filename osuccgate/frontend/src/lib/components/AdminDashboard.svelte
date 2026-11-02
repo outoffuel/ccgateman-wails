@@ -8,7 +8,8 @@
     DeleteUser, 
     GetRecentLogs, 
     GetCurrentInsideUsers,
-    ToggleFullscreen
+    ToggleFullscreen,
+    GetAppVersion
   } from '../adminApi.js';
   import { formatLogTime } from '../utils/date.js';
 
@@ -32,6 +33,7 @@
   let monthlyStatsRows = [];
   let isAdvancedOpen = false;
   let refreshTimer = null;
+  let appVersion = 'dev';
 
   // ユーザーモーダル制御
   let isUserModalOpen = false;
@@ -64,7 +66,13 @@
     }
   }
 
-  onMount(() => {
+  onMount(async () => {
+    try {
+      const v = await GetAppVersion();
+      if (v) appVersion = v;
+    } catch (e) {
+      console.warn('Failed to get version:', e);
+    }
     loadData();
     refreshTimer = setInterval(loadData, 5000);
   });
@@ -215,8 +223,9 @@
     </nav>
 
     <!-- フッター情報 -->
-    <div class="p-4 border-t border-slate-800 text-xs text-slate-500">
+    <div class="p-4 border-t border-slate-800 text-xs text-slate-500 flex items-center justify-between">
       <div class="text-[11px] text-slate-500 font-mono">SQLite DB / Wails</div>
+      <div class="text-[11px] text-blue-400 font-mono font-semibold" title="システムバージョン">{appVersion}</div>
     </div>
   </aside>
 
