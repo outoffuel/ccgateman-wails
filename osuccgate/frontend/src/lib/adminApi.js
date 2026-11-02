@@ -4,9 +4,12 @@ import {
   ClearAllLogs as wailsClearAllLogs,
   DeleteUser as wailsDeleteUser,
   ExportFiscalYearLogsCSV as wailsExportFiscalYearLogsCSV,
+  FindUserInAnyFiscalYear as wailsFindUserInAnyFiscalYear,
   ForceExitAllInside as wailsForceExitAllInside,
   GetAllUsers as wailsGetAllUsers,
   GetAppVersion as wailsGetAppVersion,
+  GetAvailableFiscalYears as wailsGetAvailableFiscalYears,
+  GetCurrentFiscalYear as wailsGetCurrentFiscalYear,
   GetCurrentInsideUsers as wailsGetCurrentInsideUsers,
   GetDashboardStats as wailsGetDashboardStats,
   GetMonthlyStats as wailsGetMonthlyStats,
@@ -76,22 +79,50 @@ export function VerifyPIN(pin) {
   }).then(result => result.success);
 }
 
-export function GetDashboardStats() {
-  return isWailsAvailable() ? wailsGetDashboardStats() : requestJSON('/api/stats');
-}
-
-export function GetMonthlyStats() {
-  return isWailsAvailable() ? wailsGetMonthlyStats() : requestJSON('/api/monthly-stats');
-}
-
-export function GetAllUsers() {
-  return isWailsAvailable() ? wailsGetAllUsers() : requestJSON('/api/users');
-}
-
-export function GetRecentLogs(limit) {
+export function GetAvailableFiscalYears() {
   return isWailsAvailable()
-    ? wailsGetRecentLogs(limit)
-    : requestJSON(`/api/logs?limit=${encodeURIComponent(limit)}`);
+    ? wailsGetAvailableFiscalYears()
+    : requestJSON('/api/fiscal-years');
+}
+
+export function GetCurrentFiscalYear() {
+  if (isWailsAvailable()) {
+    return wailsGetCurrentFiscalYear();
+  }
+  const now = new Date();
+  const y = now.getFullYear();
+  return now.getMonth() < 3 ? y - 1 : y;
+}
+
+export function FindUserInAnyFiscalYear(identifier) {
+  return isWailsAvailable()
+    ? wailsFindUserInAnyFiscalYear(identifier)
+    : requestJSON(`/api/users/find-past?identifier=${encodeURIComponent(identifier)}`);
+}
+
+export function GetDashboardStats(fiscalYear = 0) {
+  return isWailsAvailable()
+    ? wailsGetDashboardStats(fiscalYear)
+    : requestJSON(`/api/stats${fiscalYear ? `?fiscalYear=${encodeURIComponent(fiscalYear)}` : ''}`);
+}
+
+export function GetMonthlyStats(fiscalYear = 0) {
+  return isWailsAvailable()
+    ? wailsGetMonthlyStats(fiscalYear)
+    : requestJSON(`/api/monthly-stats${fiscalYear ? `?fiscalYear=${encodeURIComponent(fiscalYear)}` : ''}`);
+}
+
+export function GetAllUsers(fiscalYear = 0) {
+  return isWailsAvailable()
+    ? wailsGetAllUsers(fiscalYear)
+    : requestJSON(`/api/users${fiscalYear ? `?fiscalYear=${encodeURIComponent(fiscalYear)}` : ''}`);
+}
+
+export function GetRecentLogs(limit, fiscalYear = 0) {
+  const fyParam = fiscalYear ? `&fiscalYear=${encodeURIComponent(fiscalYear)}` : '';
+  return isWailsAvailable()
+    ? wailsGetRecentLogs(limit, fiscalYear)
+    : requestJSON(`/api/logs?limit=${encodeURIComponent(limit)}${fyParam}`);
 }
 
 export function GetCurrentInsideUsers() {
@@ -107,10 +138,11 @@ export function SaveUser(user) {
   });
 }
 
-export function DeleteUser(cardId) {
+export function DeleteUser(cardId, fiscalYear = 0) {
+  const fyParam = fiscalYear ? `?fiscalYear=${encodeURIComponent(fiscalYear)}` : '';
   return isWailsAvailable()
-    ? wailsDeleteUser(cardId)
-    : request(`/api/users/${encodeURIComponent(cardId)}`, { method: 'DELETE' });
+    ? wailsDeleteUser(cardId, fiscalYear)
+    : request(`/api/users/${encodeURIComponent(cardId)}${fyParam}`, { method: 'DELETE' });
 }
 
 export function ClearAllLogs() {

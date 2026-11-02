@@ -14,40 +14,52 @@ export function ClearAllLogs() {
   return window['go']['main']['App']['ClearAllLogs']();
 }
 
-export function DeleteUser(arg1) {
-  return window['go']['main']['App']['DeleteUser'](arg1);
+export function DeleteUser(arg1, arg2) {
+  return window['go']['main']['App']['DeleteUser'](arg1, arg2);
 }
 
 export function ExportFiscalYearLogsCSV(arg1) {
   return window['go']['main']['App']['ExportFiscalYearLogsCSV'](arg1);
 }
 
+export function FindUserInAnyFiscalYear(arg1) {
+  return window['go']['main']['App']['FindUserInAnyFiscalYear'](arg1);
+}
+
 export function ForceExitAllInside() {
   return window['go']['main']['App']['ForceExitAllInside']();
 }
 
-export function GetAllUsers() {
-  return window['go']['main']['App']['GetAllUsers']();
+export function GetAllUsers(arg1) {
+  return window['go']['main']['App']['GetAllUsers'](arg1);
 }
 
 export function GetAppVersion() {
   return window['go']['main']['App']['GetAppVersion']();
 }
 
+export function GetAvailableFiscalYears() {
+  return window['go']['main']['App']['GetAvailableFiscalYears']();
+}
+
+export function GetCurrentFiscalYear() {
+  return window['go']['main']['App']['GetCurrentFiscalYear']();
+}
+
 export function GetCurrentInsideUsers() {
   return window['go']['main']['App']['GetCurrentInsideUsers']();
 }
 
-export function GetDashboardStats() {
-  return window['go']['main']['App']['GetDashboardStats']();
+export function GetDashboardStats(arg1) {
+  return window['go']['main']['App']['GetDashboardStats'](arg1);
 }
 
-export function GetMonthlyStats() {
-  return window['go']['main']['App']['GetMonthlyStats']();
+export function GetMonthlyStats(arg1) {
+  return window['go']['main']['App']['GetMonthlyStats'](arg1);
 }
 
-export function GetRecentLogs(arg1) {
-  return window['go']['main']['App']['GetRecentLogs'](arg1);
+export function GetRecentLogs(arg1, arg2) {
+  return window['go']['main']['App']['GetRecentLogs'](arg1, arg2);
 }
 
 export function ImportLogsCSV() {

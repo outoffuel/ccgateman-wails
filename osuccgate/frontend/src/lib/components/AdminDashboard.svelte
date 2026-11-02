@@ -9,7 +9,10 @@
     GetRecentLogs, 
     GetCurrentInsideUsers,
     ToggleFullscreen,
-    GetAppVersion
+    GetAppVersion,
+    GetAvailableFiscalYears,
+    GetCurrentFiscalYear,
+    FindUserInAnyFiscalYear
   } from '../adminApi.js';
   import { formatLogTime } from '../utils/date.js';
 
@@ -25,6 +28,11 @@
   // 画面タブ ('dashboard' | 'logs' | 'inside' | 'users')
   let activeTab = 'dashboard';
 
+  // 年度管理状態
+  let currentFiscalYear = 2026;
+  let selectedFiscalYear = 2026;
+  let availableFiscalYears = [2026];
+
   // バックエンドデータ状態
   let stats = { currentInsideCount: 0, totalUserCount: 0, todayLogCount: 0, weekLogCount: 0, monthLogCount: 0, yearLogCount: 0 };
   let logs = [];
@@ -34,47 +42,105 @@
   let isAdvancedOpen = false;
   let refreshTimer = null;
   let appVersion = 'dev';
+  let isLoading = false;
+  let lastLoadedTab = null;
 
   // ユーザーモーダル制御
   let isUserModalOpen = false;
-  let modalMode = 'create'; // 'create' | 'edit'
+  let modalMode = 'create'; // 'create' | 'edit' | 'renewal'
   let selectedUserForEdit = null;
 
   // 定員設定 (単一施設)
   const ROOM_CAPACITY = 10;
 
-  // ----------------------------------------------------------------
-  // データ読み込み (adminApi呼び出しに統一)
-  // ----------------------------------------------------------------
-  async function loadData() {
-    try {
-      const [s, l, u, i, m] = await Promise.all([
-        GetDashboardStats(),
-        GetRecentLogs(500),
-        GetAllUsers(),
-        GetCurrentInsideUsers(),
-        GetMonthlyStats()
-      ]);
+  let mounted = false;
 
-      stats = s || { currentInsideCount: 0, totalUserCount: 0, todayLogCount: 0, weekLogCount: 0, monthLogCount: 0, yearLogCount: 0 };
-      users = u || [];
-      logs = l || [];
-      insideUsers = i || [];
-      monthlyStatsRows = m?.rows || [];
+  // ----------------------------------------------------------------
+  // データ読み込み (多重実行防止ガード & タブ別オンデマンド取得 & 年度対応)
+  // ----------------------------------------------------------------
+  async function loadData(forceAll = false) {
+    if (isLoading) return;
+    isLoading = true;
+
+    try {
+      // 初回またはタブ切り替え、明示的更新時は全データ取得
+      if (forceAll || lastLoadedTab !== activeTab) {
+        const [s, l, u, i, m, years] = await Promise.all([
+          GetDashboardStats(selectedFiscalYear).catch(e => { console.warn('GetDashboardStats error:', e); return null; }),
+          GetRecentLogs(500, selectedFiscalYear).catch(e => { console.warn('GetRecentLogs error:', e); return null; }),
+          GetAllUsers(selectedFiscalYear).catch(e => { console.warn('GetAllUsers error:', e); return null; }),
+          GetCurrentInsideUsers().catch(e => { console.warn('GetCurrentInsideUsers error:', e); return null; }),
+          GetMonthlyStats(selectedFiscalYear).catch(e => { console.warn('GetMonthlyStats error:', e); return null; }),
+          GetAvailableFiscalYears().catch(e => { console.warn('GetAvailableFiscalYears error:', e); return [selectedFiscalYear]; })
+        ]);
+
+        if (s) stats = s;
+        if (u) users = u;
+        if (l) logs = l;
+        if (i) insideUsers = i;
+        if (m?.rows) monthlyStatsRows = m.rows;
+        if (years && years.length > 0) {
+          availableFiscalYears = years;
+        }
+        lastLoadedTab = activeTab;
+        return;
+      }
+
+      // 5秒ごとの定期ポーリングではアクティブタブに必要なデータのみ最小限に取得
+      if (activeTab === 'dashboard') {
+        const [s, l, i] = await Promise.all([
+          GetDashboardStats(selectedFiscalYear).catch(e => { console.warn(e); return null; }),
+          GetRecentLogs(500, selectedFiscalYear).catch(e => { console.warn(e); return null; }),
+          GetCurrentInsideUsers().catch(e => { console.warn(e); return null; })
+        ]);
+        if (s) stats = s;
+        if (l) logs = l;
+        if (i) insideUsers = i;
+      } else if (activeTab === 'logs') {
+        const [l, i] = await Promise.all([
+          GetRecentLogs(500, selectedFiscalYear).catch(e => { console.warn(e); return null; }),
+          GetCurrentInsideUsers().catch(e => { console.warn(e); return null; })
+        ]);
+        if (l) logs = l;
+        if (i) insideUsers = i;
+      } else if (activeTab === 'inside') {
+        const i = await GetCurrentInsideUsers().catch(e => { console.warn(e); return null; });
+        if (i) insideUsers = i;
+      } else if (activeTab === 'users') {
+        const [u, i] = await Promise.all([
+          GetAllUsers(selectedFiscalYear).catch(e => { console.warn(e); return null; }),
+          GetCurrentInsideUsers().catch(e => { console.warn(e); return null; })
+        ]);
+        if (u) users = u;
+        if (i) insideUsers = i;
+      }
     } catch (e) {
       console.error('Failed to load DB data:', e);
+    } finally {
+      isLoading = false;
     }
+  }
+
+  // タブ切り替え時にオンデマンドでデータ取得
+  $: if (activeTab && mounted) {
+    loadData();
   }
 
   onMount(async () => {
     try {
       const v = await GetAppVersion();
       if (v) appVersion = v;
+      const cy = await GetCurrentFiscalYear();
+      if (cy) {
+        currentFiscalYear = cy;
+        selectedFiscalYear = cy;
+      }
     } catch (e) {
-      console.warn('Failed to get version:', e);
+      console.warn('Failed to get initial metadata:', e);
     }
-    loadData();
-    refreshTimer = setInterval(loadData, 5000);
+    mounted = true;
+    await loadData(true);
+    refreshTimer = setInterval(() => loadData(false), 5000);
   });
 
   onDestroy(() => {
@@ -84,15 +150,83 @@
   // ダッシュボード用の成形済みログ
   $: processedLogs = (logs || []).map(l => {
     const formatted = formatLogTime(l.timestamp);
-    const typeLabel = l.eventType === 'entry' ? '入室' : (l.eventType === 'force_exit' ? '強制退室' : '退室');
-    const result = (l.userName && l.userName !== '未登録') ? '成功' : '失敗';
+    const hasRegisteredUser = l.userName && l.userName !== '未登録';
+
+    let typeLabel = '入室';
+    let result = hasRegisteredUser ? '成功' : '失敗';
+
+    if (l.eventType === 'exit') {
+      typeLabel = '退室';
+    } else if (l.eventType === 'force_exit') {
+      typeLabel = '強制退室';
+    } else if (l.eventType === 'unregistered_renewal') {
+      typeLabel = hasRegisteredUser ? '今年度未登録(登録済)' : '今年度未登録';
+      result = hasRegisteredUser ? '登録済' : '失敗';
+    } else if (l.eventType === 'unregistered') {
+      typeLabel = hasRegisteredUser ? '未登録(登録済)' : '未登録';
+      result = hasRegisteredUser ? '登録済' : '失敗';
+    }
     const displayId = l.studentNo || l.cardId || '';
     const purpose = l.purpose || '';
-    return { ...l, formatted, typeLabel, result, displayId, purpose };
+    return { ...l, formatted, typeLabel, result, displayId, purpose, isRegistered: Boolean(hasRegisteredUser) };
   });
 
   // 在室人数カウント
   $: currentInsideNum = insideUsers ? insideUsers.length : (stats?.currentInsideCount ?? 0);
+
+  // 表示年度切り替え
+  function handleSelectFiscalYear(fy) {
+    selectedFiscalYear = fy;
+    lastLoadedTab = null;
+    loadData(true);
+  }
+
+  // ワンクリック新規登録 (未登録カード)
+  function handleOpenRegisterUnregistered(log) {
+    modalMode = 'create';
+    selectedUserForEdit = {
+      cardId: log.cardId,
+      studentNo: log.studentNo || log.cardId,
+      name: '',
+      roleName: '学生',
+      roleCode: 1,
+      adminNo: '',
+      contact: '',
+      purpose: ''
+    };
+    isUserModalOpen = true;
+  }
+
+  // ワンクリック更新 (今年度未登録カード)
+  async function handleOpenRenewalUser(log) {
+    const identifier = log.studentNo || log.cardId;
+    let pastUser = null;
+    try {
+      pastUser = await FindUserInAnyFiscalYear(identifier);
+    } catch (e) {
+      console.warn('Failed to find past user:', e);
+    }
+
+    modalMode = 'renewal';
+    if (pastUser) {
+      selectedUserForEdit = {
+        ...pastUser,
+        adminNo: '' // 今年度自動採番のためクリア
+      };
+    } else {
+      selectedUserForEdit = {
+        cardId: log.cardId,
+        studentNo: log.studentNo || log.cardId,
+        name: log.userName !== '未登録' ? log.userName : '',
+        roleName: log.roleName !== '未登録' ? log.roleName : '学生',
+        roleCode: log.roleCode ?? 1,
+        purpose: log.purpose || '',
+        adminNo: '',
+        contact: ''
+      };
+    }
+    isUserModalOpen = true;
+  }
 
   // ユーザー作成・編集・削除ハンドラ
   function handleOpenCreateUser() {
@@ -108,16 +242,18 @@
   }
 
   async function handleSaveUser(userData) {
+    // 常に今年度のデータとして登録/更新
+    userData.fiscalYear = currentFiscalYear;
     await SaveUser(userData);
-    await loadData();
+    await loadData(true);
   }
 
   async function handleDeleteUser(u) {
     const targetId = u.cardId || u.studentNo;
-    if (confirm(`「${u.name}（${u.studentNo}）」を削除しますか？\n（関連する打刻ログも削除されます）`)) {
+    if (confirm(`「${u.name}（${u.studentNo}）」を削除しますか？\n（${selectedFiscalYear}年度の登録データが削除されます）`)) {
       try {
-        await DeleteUser(targetId);
-        await loadData();
+        await DeleteUser(targetId, selectedFiscalYear);
+        await loadData(true);
       } catch (err) {
         alert("削除に失敗しました: " + (err?.message || err));
       }
@@ -274,11 +410,22 @@
           {insideUsers}
           {processedLogs}
           {monthlyStatsRows}
+          {availableFiscalYears}
+          {selectedFiscalYear}
+          onSelectFiscalYear={handleSelectFiscalYear}
           onNavigateToLogs={() => activeTab = 'logs'}
+          onRenewalUser={handleOpenRenewalUser}
+          onRegisterUnregistered={handleOpenRegisterUnregistered}
         />
       {:else if activeTab === 'logs'}
         <LogsTab 
           {logs}
+          {processedLogs}
+          {availableFiscalYears}
+          {selectedFiscalYear}
+          onSelectFiscalYear={handleSelectFiscalYear}
+          onRenewalUser={handleOpenRenewalUser}
+          onRegisterUnregistered={handleOpenRegisterUnregistered}
         />
       {:else if activeTab === 'inside'}
         <InsideTab 
@@ -289,6 +436,10 @@
       {:else if activeTab === 'users'}
         <UsersTab 
           {users}
+          {availableFiscalYears}
+          {selectedFiscalYear}
+          {currentFiscalYear}
+          onSelectFiscalYear={handleSelectFiscalYear}
           onCreateUser={handleOpenCreateUser}
           onEditUser={handleOpenEditUser}
           onDeleteUser={handleDeleteUser}
@@ -302,6 +453,7 @@
     isOpen={isUserModalOpen}
     mode={modalMode}
     initialUser={selectedUserForEdit}
+    {currentFiscalYear}
     onClose={() => isUserModalOpen = false}
     onSave={handleSaveUser}
   />

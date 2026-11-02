@@ -6,6 +6,7 @@ import (
 	"log"
 	"os"
 	"path/filepath"
+	"strings"
 	"time"
 
 	"osuccgate/internal/db"
@@ -41,16 +42,63 @@ func NewApp(version string) *App {
 	}
 }
 
+// resolveDatabasePath データベースファイルの最適なパスを解決する
+func resolveDatabasePath() string {
+	// 1. 環境変数による明示的な指定があれば最優先
+	if envPath := os.Getenv("OSUCCGATE_DB_PATH"); envPath != "" {
+		return envPath
+	}
+
+	// 2. 実行ファイルと同じディレクトリのDB (本番バイナリ実行時)
+	if exePath, err := os.Executable(); err == nil {
+		exeDir := filepath.Dir(exePath)
+		// 一時ディレクトリ(go run等)でなければチェック
+		if !strings.Contains(exeDir, "go-build") && !strings.Contains(exeDir, "/tmp") && !strings.Contains(exeDir, "\\Temp") {
+			candidate := filepath.Join(exeDir, "osuccgate.db")
+			if fi, err := os.Stat(candidate); err == nil && !fi.IsDir() {
+				return candidate
+			}
+		}
+	}
+
+	// 3. カレントディレクトリおよび関連パス候補
+	cwd, _ := os.Getwd()
+	candidates := []string{
+		filepath.Join(cwd, "build", "bin", "osuccgate.db"),
+		filepath.Join(cwd, "osuccgate", "build", "bin", "osuccgate.db"),
+		filepath.Join(cwd, "osuccgate", "osuccgate.db"),
+		filepath.Join(cwd, "osuccgate.db"),
+	}
+
+	// 既にサイズが存在する (データが入っている) DBがあれば最も大きいものを優先
+	var bestCandidate string
+	var maxBytes int64 = 0
+	for _, c := range candidates {
+		if fi, err := os.Stat(c); err == nil && !fi.IsDir() {
+			if fi.Size() > maxBytes {
+				maxBytes = fi.Size()
+				bestCandidate = c
+			}
+		}
+	}
+	if bestCandidate != "" && maxBytes > 0 {
+		return bestCandidate
+	}
+
+	// 4. フォールバック
+	if cwd != "" {
+		return filepath.Join(cwd, "osuccgate.db")
+	}
+	return "osuccgate.db"
+}
+
 // startup is called at application startup
 func (a *App) startup(ctx context.Context) {
 	a.ctx = ctx
 
 	// データベース保存パスの決定 (実行ディレクトリまたはAppData)
-	dbPath := "osuccgate.db"
-	execDir, err := os.Getwd()
-	if err == nil {
-		dbPath = filepath.Join(execDir, "osuccgate.db")
-	}
+	dbPath := resolveDatabasePath()
+	log.Printf("[Startup] Using SQLite database: %s", dbPath)
 
 	// SQLite初期化
 	dbMgr, err := db.InitDB(dbPath)
@@ -119,19 +167,34 @@ func (a *App) VerifyPIN(pin string) bool {
 	return pin == a.adminPin
 }
 
-// GetDashboardStats ダッシュボード統計データの取得
-func (a *App) GetDashboardStats() (*db.DashboardStats, error) {
-	return a.dbManager.GetDashboardStats()
+// GetAvailableFiscalYears 利用可能な年度一覧（降順）を取得
+func (a *App) GetAvailableFiscalYears() ([]int, error) {
+	return a.dbManager.GetAvailableFiscalYears()
 }
 
-// GetMonthlyStats 月別・区分別統計データの取得 (01prompt, 19prompt要件)
-func (a *App) GetMonthlyStats() (*db.MonthlyStatsResponse, error) {
-	return a.dbManager.GetMonthlyStats()
+// GetCurrentFiscalYear 現在の年度を取得
+func (a *App) GetCurrentFiscalYear() int {
+	return db.CurrentFiscalYear()
 }
 
-// GetAllUsers 登録ユーザー一覧の取得
-func (a *App) GetAllUsers() ([]db.RegisteredUser, error) {
-	return a.dbManager.GetAllUsers()
+// GetDashboardStats ダッシュボード統計データの取得 (年度指定対応)
+func (a *App) GetDashboardStats(fiscalYear int) (*db.DashboardStats, error) {
+	return a.dbManager.GetDashboardStats(fiscalYear)
+}
+
+// GetMonthlyStats 月別・区分別統計データの取得 (01prompt, 19prompt要件、年度指定対応)
+func (a *App) GetMonthlyStats(fiscalYear int) (*db.MonthlyStatsResponse, error) {
+	return a.dbManager.GetMonthlyStats(fiscalYear)
+}
+
+// GetAllUsers 登録ユーザー一覧の取得 (年度指定対応)
+func (a *App) GetAllUsers(fiscalYear int) ([]db.RegisteredUser, error) {
+	return a.dbManager.GetAllUsers(fiscalYear)
+}
+
+// FindUserInAnyFiscalYear 過去年度を含め最新の登録情報を検索 (更新モーダル用)
+func (a *App) FindUserInAnyFiscalYear(identifier string) (*db.RegisteredUser, error) {
+	return a.dbManager.FindUserInAnyFiscalYear(identifier)
 }
 
 // SaveUser ユーザーの登録・更新
@@ -139,17 +202,17 @@ func (a *App) SaveUser(user db.RegisteredUser) error {
 	return a.dbManager.UpsertUser(&user)
 }
 
-// DeleteUser ユーザーの削除
-func (a *App) DeleteUser(cardID string) error {
-	return a.dbManager.DeleteUser(cardID)
+// DeleteUser ユーザーの削除 (年度指定対応)
+func (a *App) DeleteUser(cardID string, fiscalYear int) error {
+	return a.dbManager.DeleteUser(cardID, fiscalYear)
 }
 
-// GetRecentLogs 最新の入退室ログを取得
-func (a *App) GetRecentLogs(limit int) ([]db.AccessLog, error) {
+// GetRecentLogs 最新の入退室ログを取得 (年度指定対応)
+func (a *App) GetRecentLogs(limit int, fiscalYear int) ([]db.AccessLog, error) {
 	if limit <= 0 {
 		limit = 50
 	}
-	return a.dbManager.GetRecentLogs(limit)
+	return a.dbManager.GetRecentLogs(limit, fiscalYear)
 }
 
 // GetCurrentInsideUsers 現在在室中ユーザー一覧の取得

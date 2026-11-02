@@ -66,9 +66,11 @@ func (s *HTTPServer) Start() {
 
 	// APIルート
 	handleWithCORS("/api/auth/verify", s.handleVerifyPIN)
+	handleWithCORS("/api/fiscal-years", s.handleGetFiscalYears)
 	handleWithCORS("/api/stats", s.handleGetStats)
 	handleWithCORS("/api/monthly-stats", s.handleGetMonthlyStats)
 	handleWithCORS("/api/users", s.handleUsers)
+	handleWithCORS("/api/users/find-past", s.handleFindPastUser)
 	handleWithCORS("/api/users/", s.handleUserByID)
 	handleWithCORS("/api/logs", s.handleLogs)
 	handleWithCORS("/api/inside", s.handleInsideUsers)
@@ -128,12 +130,55 @@ func (s *HTTPServer) handleVerifyPIN(w http.ResponseWriter, r *http.Request) {
 	})
 }
 
+func (s *HTTPServer) handleGetFiscalYears(w http.ResponseWriter, r *http.Request) {
+	if !s.checkPIN(r) {
+		http.Error(w, "Unauthorized PIN", http.StatusUnauthorized)
+		return
+	}
+	years, err := s.dbManager.GetAvailableFiscalYears()
+	if err != nil {
+		http.Error(w, err.Error(), http.StatusInternalServerError)
+		return
+	}
+	w.Header().Set("Content-Type", "application/json")
+	json.NewEncoder(w).Encode(years)
+}
+
+func (s *HTTPServer) handleFindPastUser(w http.ResponseWriter, r *http.Request) {
+	if !s.checkPIN(r) {
+		http.Error(w, "Unauthorized PIN", http.StatusUnauthorized)
+		return
+	}
+	identifier := r.URL.Query().Get("identifier")
+	if identifier == "" {
+		identifier = r.URL.Query().Get("cardId")
+	}
+	if identifier == "" {
+		http.Error(w, "Identifier is required", http.StatusBadRequest)
+		return
+	}
+	u, err := s.dbManager.FindUserInAnyFiscalYear(identifier)
+	if err != nil {
+		http.Error(w, err.Error(), http.StatusInternalServerError)
+		return
+	}
+	w.Header().Set("Content-Type", "application/json")
+	json.NewEncoder(w).Encode(u)
+}
+
 func (s *HTTPServer) handleGetStats(w http.ResponseWriter, r *http.Request) {
 	if !s.checkPIN(r) {
 		http.Error(w, "Unauthorized PIN", http.StatusUnauthorized)
 		return
 	}
-	stats, err := s.dbManager.GetDashboardStats()
+	var fy int
+	if fyStr := r.URL.Query().Get("fiscalYear"); fyStr != "" {
+		fy, _ = strconv.Atoi(fyStr)
+	} else if yStr := r.URL.Query().Get("year"); yStr != "" {
+		fy, _ = strconv.Atoi(yStr)
+	}
+
+	stats, err := s.dbManager.GetDashboardStats(fy)
 	if err != nil {
 		http.Error(w, err.Error(), http.StatusInternalServerError)
 		return
@@ -147,7 +192,14 @@ func (s *HTTPServer) handleGetMonthlyStats(w http.ResponseWriter, r *http.Reques
 		http.Error(w, "Unauthorized PIN", http.StatusUnauthorized)
 		return
 	}
-	stats, err := s.dbManager.GetMonthlyStats()
+	var fy int
+	if fyStr := r.URL.Query().Get("fiscalYear"); fyStr != "" {
+		fy, _ = strconv.Atoi(fyStr)
+	} else if yStr := r.URL.Query().Get("year"); yStr != "" {
+		fy, _ = strconv.Atoi(yStr)
+	}
+
+	stats, err := s.dbManager.GetMonthlyStats(fy)
 	if err != nil {
 		http.Error(w, err.Error(), http.StatusInternalServerError)
 		return
@@ -163,7 +215,13 @@ func (s *HTTPServer) handleUsers(w http.ResponseWriter, r *http.Request) {
 			http.Error(w, "Unauthorized PIN", http.StatusUnauthorized)
 			return
 		}
-		users, err := s.dbManager.GetAllUsers()
+		var fy int
+		if fyStr := r.URL.Query().Get("fiscalYear"); fyStr != "" {
+			fy, _ = strconv.Atoi(fyStr)
+		} else if yStr := r.URL.Query().Get("year"); yStr != "" {
+			fy, _ = strconv.Atoi(yStr)
+		}
+		users, err := s.dbManager.GetAllUsers(fy)
 		if err != nil {
 			http.Error(w, err.Error(), http.StatusInternalServerError)
 			return
@@ -209,7 +267,13 @@ func (s *HTTPServer) handleUserByID(w http.ResponseWriter, r *http.Request) {
 			http.Error(w, "Unauthorized PIN", http.StatusUnauthorized)
 			return
 		}
-		if err := s.dbManager.DeleteUser(cardID); err != nil {
+		var fy int
+		if fyStr := r.URL.Query().Get("fiscalYear"); fyStr != "" {
+			fy, _ = strconv.Atoi(fyStr)
+		} else if yStr := r.URL.Query().Get("year"); yStr != "" {
+			fy, _ = strconv.Atoi(yStr)
+		}
+		if err := s.dbManager.DeleteUser(cardID, fy); err != nil {
 			http.Error(w, err.Error(), http.StatusInternalServerError)
 			return
 		}
@@ -234,7 +298,13 @@ func (s *HTTPServer) handleLogs(w http.ResponseWriter, r *http.Request) {
 				limit = l
 			}
 		}
-		logs, err := s.dbManager.GetRecentLogs(limit)
+		var fy int
+		if fyStr := r.URL.Query().Get("fiscalYear"); fyStr != "" {
+			fy, _ = strconv.Atoi(fyStr)
+		} else if yStr := r.URL.Query().Get("year"); yStr != "" {
+			fy, _ = strconv.Atoi(yStr)
+		}
+		logs, err := s.dbManager.GetRecentLogs(limit, fy)
 		if err != nil {
 			http.Error(w, err.Error(), http.StatusInternalServerError)
 			return
