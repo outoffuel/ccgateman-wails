@@ -3,6 +3,7 @@ package main
 import (
 	"embed"
 	"log"
+	"os"
 
 	"osuccgate/internal/updater"
 
@@ -10,6 +11,7 @@ import (
 	"github.com/wailsapp/wails/v2/pkg/logger"
 	"github.com/wailsapp/wails/v2/pkg/options"
 	"github.com/wailsapp/wails/v2/pkg/options/assetserver"
+	"github.com/wailsapp/wails/v2/pkg/options/linux"
 	"github.com/wailsapp/wails/v2/pkg/options/mac"
 	"github.com/wailsapp/wails/v2/pkg/options/windows"
 )
@@ -24,6 +26,11 @@ var icon []byte
 var appVersion = "dev"
 
 func main() {
+	// Linux / WebKitGTK 環境で Wayland / GPU コンポジティングによるクラッシュを防止
+	if os.Getenv("WEBKIT_DISABLE_COMPOSITING_MODE") == "" {
+		_ = os.Setenv("WEBKIT_DISABLE_COMPOSITING_MODE", "1")
+	}
+
 	// 前回の更新残骸 (.old) をクリーンアップ
 	updater.CleanupOldExecutable()
 
@@ -58,6 +65,13 @@ func main() {
 		WindowStartState: options.Fullscreen,
 		Bind: []interface{}{
 			app,
+		},
+		// Linux platform specific options
+		Linux: &linux.Options{
+			Icon:                icon,
+			WindowIsTranslucent: false,
+			WebviewGpuPolicy:    linux.WebviewGpuPolicyNever,
+			ProgramName:         "osuccgate",
 		},
 		// Windows platform specific options
 		Windows: &windows.Options{

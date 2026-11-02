@@ -1,3 +1,5 @@
+const collator = new Intl.Collator('ja', { numeric: true });
+
 /**
  * リストを指定キーと方向でソートする
  * @template T
@@ -12,9 +14,11 @@ export function sortList(list, key, dir) {
     let valA = a[key] ?? '';
     let valB = b[key] ?? '';
     let res = 0;
-    if (typeof valA === 'number' && typeof valB === 'number') res = valA - valB;
-    else res = String(valA).localeCompare(String(valB), 'ja', { numeric: true });
+    if (typeof valA === 'number' && typeof valB === 'number') {
+      res = valA - valB;
+    } else {
+      res = collator.compare(String(valA), String(valB));
+    }
     return dir === 'asc' ? res : -res;
   });
 }
-

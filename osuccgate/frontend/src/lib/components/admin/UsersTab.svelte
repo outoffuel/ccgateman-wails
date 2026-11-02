@@ -4,6 +4,10 @@
   import { clampPage, getPageItems } from '../../utils/pagination.js';
 
   export let users = [];
+  export let availableFiscalYears = [2026];
+  export let selectedFiscalYear = 2026;
+  export let currentFiscalYear = 2026;
+  export let onSelectFiscalYear = () => {};
   export let onCreateUser = () => {};
   export let onEditUser = () => {};
   export let onDeleteUser = () => {};
@@ -124,17 +128,49 @@
       <h2 class="text-xl font-bold text-slate-800">ユーザー管理</h2>
       <p class="text-xs text-slate-500 mt-0.5">クリエイトセンターへの入室を許可する利用者を登録・管理します（列幅調整・ソート対応）</p>
     </div>
-    <!-- 目立つ青色の ＋ 新規登録 ボタン -->
-    <button 
-      on:click={onCreateUser}
-      class="px-5 py-2.5 bg-blue-600 hover:bg-blue-700 text-white rounded-xl text-xs font-bold transition shadow-sm flex items-center justify-center gap-1.5"
-    >
-      <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 6v6m0 0v6m0-6h6m-6 0H6"/>
-      </svg>
-      新規登録
-    </button>
+    <div class="flex items-center gap-3">
+      <!-- 表示年度プルダウン (要件4) -->
+      <div class="flex items-center gap-1.5 bg-white border border-slate-300 rounded-xl px-3 py-1.5 shadow-xs">
+        <label for="users-fiscal-year-select" class="text-xs font-bold text-slate-600 whitespace-nowrap">表示年度:</label>
+        <select 
+          id="users-fiscal-year-select" 
+          value={selectedFiscalYear} 
+          on:change={(e) => onSelectFiscalYear(Number(e.target.value))}
+          class="text-xs font-bold text-blue-700 bg-transparent focus:outline-none cursor-pointer"
+        >
+          {#each availableFiscalYears as fy}
+            <option value={fy}>{fy}年度</option>
+          {/each}
+        </select>
+      </div>
+
+      <!-- 目立つ青色の ＋ 新規登録 ボタン -->
+      <button 
+        on:click={onCreateUser}
+        class="px-5 py-2.5 bg-blue-600 hover:bg-blue-700 text-white rounded-xl text-xs font-bold transition shadow-sm flex items-center justify-center gap-1.5"
+      >
+        <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+          <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 6v6m0 0v6m0-6h6m-6 0H6"/>
+        </svg>
+        新規登録
+      </button>
+    </div>
   </div>
+
+  {#if selectedFiscalYear !== currentFiscalYear}
+    <div class="px-4 py-2.5 rounded-xl bg-amber-50 border border-amber-200 text-xs text-amber-800 flex items-center justify-between">
+      <div class="flex items-center gap-2">
+        <span class="font-bold">⚠️ アーカイブ表示中：</span>
+        <span>現在は過去の「{selectedFiscalYear}年度」の登録者マスターを表示しています。</span>
+      </div>
+      <button 
+        on:click={() => onSelectFiscalYear(currentFiscalYear)}
+        class="text-xs font-bold text-amber-900 hover:underline"
+      >
+        今年度（{currentFiscalYear}年度）に戻る →
+      </button>
+    </div>
+  {/if}
 
   <!-- 検索 & 区分フィルター -->
   <div class="bg-white rounded-xl border border-slate-200/90 shadow-sm p-5 flex flex-col md:flex-row md:items-center justify-between gap-4">

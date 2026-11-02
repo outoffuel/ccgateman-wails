@@ -35,6 +35,13 @@ function playTone(freq, type, duration, startTime = 0, gainLevel = 0.15) {
   osc.connect(gain);
   gain.connect(ctx.destination);
 
+  osc.onended = () => {
+    try {
+      osc.disconnect();
+      gain.disconnect();
+    } catch (_) {}
+  };
+
   osc.start(ctx.currentTime + startTime);
   osc.stop(ctx.currentTime + startTime + duration);
 }

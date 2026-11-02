@@ -64,6 +64,16 @@ func (s *GateService) SetUpdater(u *updater.Updater, version string) {
 	s.appVersion = version
 }
 
+// cleanupExpiredSwipes 期限切れのデバウンスエントリを削除（呼び出し元で s.mu のロック要）
+func (s *GateService) cleanupExpiredSwipes(now time.Time) {
+	threshold := now.Add(-30 * time.Second)
+	for id, t := range s.lastSwipes {
+		if t.Before(threshold) {
+			delete(s.lastSwipes, id)
+		}
+	}
+}
+
 // StartScheduler 23:00強制退室 & 23:05自動アップデートスケジューラーの開始
 func (s *GateService) StartScheduler() {
 	ctx, cancel := context.WithCancel(context.Background())
@@ -78,6 +88,11 @@ func (s *GateService) StartScheduler() {
 			case <-ctx.Done():
 				return
 			case now := <-ticker.C:
+				// デバウンス用マップの定期クリーンアップ
+				s.mu.Lock()
+				s.cleanupExpiredSwipes(now)
+				s.mu.Unlock()
+
 				todayStr := now.Format("2006-01-02")
 
 				// 1. 毎日 23:00 (23時00分〜23時01分の間) に強制退室チェック
@@ -154,6 +169,9 @@ func (s *GateService) ProcessSwipe(rawCardID string) *SwipeResponse {
 	// デバウンス制御 (2秒以内は無視)
 	s.mu.Lock()
 	now := time.Now()
+	if len(s.lastSwipes) > 100 {
+		s.cleanupExpiredSwipes(now)
+	}
 	if lastTime, exists := s.lastSwipes[cardID]; exists {
 		if now.Sub(lastTime) < s.debounceSec {
 			s.mu.Unlock()
@@ -167,8 +185,9 @@ func (s *GateService) ProcessSwipe(rawCardID string) *SwipeResponse {
 	s.lastSwipes[cardID] = now
 	s.mu.Unlock()
 
-	// ユーザー取得
-	user, err := s.dbManager.GetUser(cardID)
+	// ユーザー取得 (今年度の登録者)
+	currentFY := db.CurrentFiscalYear()
+	user, err := s.dbManager.GetUser(cardID, currentFY)
 	if err != nil {
 		return &SwipeResponse{
 			Success:      false,
@@ -178,11 +197,35 @@ func (s *GateService) ProcessSwipe(rawCardID string) *SwipeResponse {
 	}
 
 	if user == nil {
-		// 未登録ユーザー
+		// 今年度の登録がない場合 -> 過去年度の登録を検索
+		pastUser, pastErr := s.dbManager.FindUserInAnyFiscalYear(cardID)
+		if pastErr == nil && pastUser != nil {
+			// 1. 過去年度に存在する場合（「今年度未登録」）
+			errMsg := fmt.Sprintf("今年度の利用登録が未更新です（氏名: %s）", pastUser.Name)
+			_, _ = s.dbManager.RecordUnregisteredSwipe(cardID, "unregistered_renewal", pastUser)
+			return &SwipeResponse{
+				Success:      false,
+				CardID:       cardID,
+				UserName:     pastUser.Name,
+				RoleName:     pastUser.RoleName,
+				RoleCode:     pastUser.RoleCode,
+				StudentNo:    pastUser.StudentNo,
+				EventType:    "unregistered_renewal",
+				Timestamp:    now.Format("15:04:05"),
+				ErrorMessage: errMsg,
+				SoundType:    "booboo",
+			}
+		}
+
+		// 2. 過去年度にも存在しない場合（完全な「未登録」）
+		errMsg := fmt.Sprintf("未登録のカードです (ID: %s)", cardID)
+		_, _ = s.dbManager.RecordUnregisteredSwipe(cardID, "unregistered", nil)
 		return &SwipeResponse{
 			Success:      false,
 			CardID:       cardID,
-			ErrorMessage: fmt.Sprintf("未登録のカードです (ID: %s)", cardID),
+			EventType:    "unregistered",
+			Timestamp:    now.Format("15:04:05"),
+			ErrorMessage: errMsg,
 			SoundType:    "booboo",
 		}
 	}
@@ -250,13 +293,23 @@ func (s *GateService) GenerateFiscalYearCSV(year int) ([]byte, error) {
 
 	for _, l := range logs {
 		eventTypeJa := "入室"
-		if l.EventType == "exit" {
+		resultStr := "成功"
+
+		switch l.EventType {
+		case "exit":
 			eventTypeJa = "退室"
-		} else if l.EventType == "force_exit" {
+		case "force_exit":
 			eventTypeJa = "強制退室"
+		case "unregistered_renewal":
+			eventTypeJa = "今年度未登録"
+			resultStr = "失敗"
+		case "unregistered":
+			eventTypeJa = "未登録"
+			resultStr = "失敗"
+		default:
+			eventTypeJa = "入室"
 		}
 
-		resultStr := "成功"
 		if l.UserName == "" || l.UserName == "未登録" {
 			resultStr = "失敗"
 		}
@@ -338,9 +391,9 @@ func parseCustomDate(val string) time.Time {
 	return time.Now()
 }
 
-// ImportUsersCSV CSVデータから利用者を一括インポート
+// ImportUsersCSV CSVデータから利用者を一括インポート (年度指定対応、省略時は今年度)
 // フォーマット: 管理番号,登録日,ID,氏名,フリガナ,性別,区分コード(1:学生 9:学生スタッフ 0:教職員),利用目的,連絡先
-func (s *GateService) ImportUsersCSV(csvData []byte) (int, int, error) {
+func (s *GateService) ImportUsersCSV(csvData []byte, fiscalYears ...int) (int, int, error) {
 	cleanData, err := sanitizeCSVData(csvData)
 	if err != nil {
 		return 0, 0, fmt.Errorf("CSVデータの読み込みに失敗しました: %w", err)
@@ -357,6 +410,11 @@ func (s *GateService) ImportUsersCSV(csvData []byte) (int, int, error) {
 
 	if len(rows) == 0 {
 		return 0, 0, fmt.Errorf("CSVデータが空です")
+	}
+
+	targetFY := db.CurrentFiscalYear()
+	if len(fiscalYears) > 0 && fiscalYears[0] > 0 {
+		targetFY = fiscalYears[0]
 	}
 
 	// ヘッダー行判定
@@ -410,7 +468,7 @@ func (s *GateService) ImportUsersCSV(csvData []byte) (int, int, error) {
 	// 既存DBの管理番号の最大整数値を取得（自動採番・振り直し用）
 	currentMaxAdminNo := 0
 	if s.dbManager != nil {
-		currentMaxAdminNo, _ = s.dbManager.GetMaxAdminNo()
+		currentMaxAdminNo, _ = s.dbManager.GetMaxAdminNo(targetFY)
 	}
 
 	// CSV内で指定されている既存の数値管理番号があれば最大値を把握
@@ -504,18 +562,19 @@ func (s *GateService) ImportUsersCSV(csvData []byte) (int, int, error) {
 		}
 
 		users = append(users, db.RegisteredUser{
-			CardID:    cardID,
-			Name:      name,
-			Furigana:  furigana,
-			Gender:    genderNorm,
-			RoleName:  roleName,
-			RoleCode:  roleCode,
-			StudentNo: studentNo,
-			AdminNo:   adminNo,
-			Purpose:   purpose,
-			Contact:   contact,
-			CreatedAt: createdAt,
-			UpdatedAt: time.Now(),
+			CardID:     cardID,
+			FiscalYear: targetFY,
+			Name:       name,
+			Furigana:   furigana,
+			Gender:     genderNorm,
+			RoleName:   roleName,
+			RoleCode:   roleCode,
+			StudentNo:  studentNo,
+			AdminNo:    adminNo,
+			Purpose:    purpose,
+			Contact:    contact,
+			CreatedAt:  createdAt,
+			UpdatedAt:  time.Now(),
 		})
 	}
 
@@ -523,11 +582,11 @@ func (s *GateService) ImportUsersCSV(csvData []byte) (int, int, error) {
 		return 0, len(rows) - startIdx, fmt.Errorf("インポート可能な利用者データが見つかりませんでした")
 	}
 
-	count, err := s.dbManager.ImportUsers(users)
+	count, err := s.dbManager.ImportUsers(users, targetFY)
 	return count, len(users), err
 }
 
-// ImportLogsCSV CSVデータから入退室ログを一括インポート
+// ImportLogsCSV CSVデータから入退室ログを一括インポート (スナップショット対応)
 func (s *GateService) ImportLogsCSV(csvData []byte) (int, int, error) {
 	cleanData, err := sanitizeCSVData(csvData)
 	if err != nil {
@@ -564,6 +623,15 @@ func (s *GateService) ImportLogsCSV(csvData []byte) (int, int, error) {
 			isHeader = true
 		} else if cleaned == "id" || strings.Contains(cleaned, "識別") || strings.Contains(cleaned, "カード") || strings.Contains(cleaned, "学籍") || strings.Contains(cleaned, "学生番号") || cleaned == "cardid" || cleaned == "studentno" {
 			headerMap["card_id"] = colIdx
+			isHeader = true
+		} else if strings.Contains(cleaned, "氏名") || strings.Contains(cleaned, "名前") || cleaned == "name" || cleaned == "username" {
+			headerMap["name"] = colIdx
+			isHeader = true
+		} else if strings.Contains(cleaned, "区分") || strings.Contains(cleaned, "役職") || strings.Contains(cleaned, "ロール") || cleaned == "role" || cleaned == "rolename" {
+			headerMap["role_name"] = colIdx
+			isHeader = true
+		} else if strings.Contains(cleaned, "利用目的") || strings.Contains(cleaned, "目的") || cleaned == "purpose" {
+			headerMap["purpose"] = colIdx
 			isHeader = true
 		} else if strings.Contains(cleaned, "入退室") || strings.Contains(cleaned, "種別") || strings.Contains(cleaned, "イベント") || strings.Contains(cleaned, "ステータス") || cleaned == "eventtype" || cleaned == "type" || cleaned == "status" {
 			headerMap["event_type"] = colIdx
@@ -606,6 +674,9 @@ func (s *GateService) ImportLogsCSV(csvData []byte) (int, int, error) {
 
 		tsStr := getCol("timestamp", 0)
 		cardID := getCol("card_id", 1)
+		rowName := getCol("name", 2)
+		rowRole := getCol("role_name", 4)
+		rowPurpose := getCol("purpose", 5)
 		eventStr := getCol("event_type", 6)
 		durStr := getCol("duration", 7)
 
@@ -628,7 +699,11 @@ func (s *GateService) ImportLogsCSV(csvData []byte) (int, int, error) {
 		// 種別パース
 		eventType := "entry"
 		eventTrimmed := strings.TrimSpace(eventStr)
-		if strings.Contains(eventTrimmed, "強制退室") || eventTrimmed == "force_exit" {
+		if strings.Contains(eventTrimmed, "未更新") || strings.Contains(eventTrimmed, "今年度未登録") || eventTrimmed == "unregistered_renewal" {
+			eventType = "unregistered_renewal"
+		} else if strings.Contains(eventTrimmed, "未登録") || eventTrimmed == "unregistered" {
+			eventType = "unregistered"
+		} else if strings.Contains(eventTrimmed, "強制退室") || eventTrimmed == "force_exit" {
 			eventType = "force_exit"
 		} else if strings.Contains(eventTrimmed, "退室") || strings.Contains(eventTrimmed, "退") || strings.ToLower(eventTrimmed) == "exit" || strings.ToLower(eventTrimmed) == "out" {
 			eventType = "exit"
@@ -646,15 +721,47 @@ func (s *GateService) ImportLogsCSV(csvData []byte) (int, int, error) {
 			}
 		}
 
-		// cardID のユーザー解決（学籍番号またはカードIDから既存カードIDを探す）
+		userName := rowName
+		roleName := rowRole
+		roleCode := 1
+		studentNo := cardID
+		purpose := rowPurpose
+
+		// ユーザー情報の解決
 		if cardID != "" {
-			if u, _ := s.dbManager.GetUser(cardID); u != nil {
+			if u, _ := s.dbManager.FindUserInAnyFiscalYear(cardID); u != nil {
 				cardID = u.CardID
+				if userName == "" {
+					userName = u.Name
+				}
+				if roleName == "" {
+					roleName = u.RoleName
+				}
+				roleCode = u.RoleCode
+				if studentNo == "" {
+					studentNo = u.StudentNo
+				}
+				if purpose == "" {
+					purpose = u.Purpose
+				}
+			}
+		}
+
+		if roleCode == 1 && roleName != "" {
+			if strings.Contains(roleName, "教職員") || roleName == "0" {
+				roleCode = 0
+			} else if strings.Contains(roleName, "スタッフ") || roleName == "9" {
+				roleCode = 9
 			}
 		}
 
 		logs = append(logs, db.AccessLog{
 			CardID:         cardID,
+			UserName:       userName,
+			RoleName:       roleName,
+			RoleCode:       roleCode,
+			StudentNo:      studentNo,
+			Purpose:        purpose,
 			EventType:      eventType,
 			Timestamp:      parsedTime,
 			DurationSecond: durSec,
@@ -676,11 +783,22 @@ func (s *GateService) ImportLogsCSV(csvData []byte) (int, int, error) {
 		lastEvent string
 		lastTime  time.Time
 		lastDate  string
+		userName  string
+		roleName  string
+		roleCode  int
+		studentNo string
+		purpose   string
 	}
 	cardStates := make(map[string]userDayState)
 
 	var finalLogs []db.AccessLog
 	for _, l := range logs {
+		// 未登録ログは退室補完の対象外
+		if l.EventType == "unregistered" || l.EventType == "unregistered_renewal" {
+			finalLogs = append(finalLogs, l)
+			continue
+		}
+
 		logDate := l.Timestamp.Format("2006-01-02")
 		state, exists := cardStates[l.CardID]
 
@@ -696,11 +814,25 @@ func (s *GateService) ImportLogsCSV(csvData []byte) (int, int, error) {
 			}
 			finalLogs = append(finalLogs, db.AccessLog{
 				CardID:         l.CardID,
+				UserName:       state.userName,
+				RoleName:       state.roleName,
+				RoleCode:       state.roleCode,
+				StudentNo:      state.studentNo,
+				Purpose:        state.purpose,
 				EventType:      "force_exit",
 				Timestamp:      exitTime,
 				DurationSecond: dur,
 			})
-			cardStates[l.CardID] = userDayState{lastEvent: "force_exit", lastTime: exitTime, lastDate: state.lastDate}
+			cardStates[l.CardID] = userDayState{
+				lastEvent: "force_exit",
+				lastTime:  exitTime,
+				lastDate:  state.lastDate,
+				userName:  state.userName,
+				roleName:  state.roleName,
+				roleCode:  state.roleCode,
+				studentNo: state.studentNo,
+				purpose:   state.purpose,
+			}
 		}
 
 		finalLogs = append(finalLogs, l)
@@ -708,6 +840,11 @@ func (s *GateService) ImportLogsCSV(csvData []byte) (int, int, error) {
 			lastEvent: l.EventType,
 			lastTime:  l.Timestamp,
 			lastDate:  logDate,
+			userName:  l.UserName,
+			roleName:  l.RoleName,
+			roleCode:  l.RoleCode,
+			studentNo: l.StudentNo,
+			purpose:   l.Purpose,
 		}
 	}
 
@@ -724,6 +861,11 @@ func (s *GateService) ImportLogsCSV(csvData []byte) (int, int, error) {
 			}
 			finalLogs = append(finalLogs, db.AccessLog{
 				CardID:         cardID,
+				UserName:       state.userName,
+				RoleName:       state.roleName,
+				RoleCode:       state.roleCode,
+				StudentNo:      state.studentNo,
+				Purpose:        state.purpose,
 				EventType:      "force_exit",
 				Timestamp:      exitTime,
 				DurationSecond: dur,

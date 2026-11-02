@@ -182,3 +182,157 @@ func TestGateService_CSVImportAndDualAuth(t *testing.T) {
 		t.Errorf("Expected 3 imported logs, got imported=%d, total=%d", logImported, logTotal)
 	}
 }
+
+func TestGateService_FiscalYearAndRenewalSwipe(t *testing.T) {
+	tempDir, err := os.MkdirTemp("", "osuccgate_fy_test_*")
+	if err != nil {
+		t.Fatalf("Failed to create temp dir: %v", err)
+	}
+	defer os.RemoveAll(tempDir)
+
+	dbPath := filepath.Join(tempDir, "test.db")
+	mgr, err := db.InitDB(dbPath)
+	if err != nil {
+		t.Fatalf("InitDB failed: %v", err)
+	}
+	defer mgr.Close()
+
+	svc := NewGateService(mgr)
+	currentFY := db.CurrentFiscalYear()
+	pastFY := currentFY - 1
+
+	// 1. 前年度（pastFY）のユーザーを登録
+	pastUser := &db.RegisteredUser{
+		CardID:     "PAST_CARD_001",
+		FiscalYear: pastFY,
+		Name:       "昨年度 太郎",
+		Furigana:   "サクネンド タロウ",
+		RoleName:   "学生",
+		RoleCode:   1,
+		StudentNo:  "B2025001",
+		Purpose:    "プログラミング",
+	}
+	if err := mgr.UpsertUser(pastUser); err != nil {
+		t.Fatalf("Failed to insert past user: %v", err)
+	}
+
+	// 2. 今年度未登録カードの打刻判定
+	resRenewal := svc.ProcessSwipe("PAST_CARD_001")
+	if resRenewal.Success {
+		t.Errorf("Expected swipe to fail for past year user in new fiscal year")
+	}
+	if resRenewal.EventType != "unregistered_renewal" {
+		t.Errorf("Expected eventType 'unregistered_renewal', got '%s'", resRenewal.EventType)
+	}
+	if !strings.Contains(resRenewal.ErrorMessage, "今年度の利用登録が未更新です") || !strings.Contains(resRenewal.ErrorMessage, "昨年度 太郎") {
+		t.Errorf("Unexpected error message: %s", resRenewal.ErrorMessage)
+	}
+	if resRenewal.SoundType != "booboo" {
+		t.Errorf("Expected booboo sound, got %s", resRenewal.SoundType)
+	}
+
+	// 3. 完全未登録カードの打刻判定
+	resUnregistered := svc.ProcessSwipe("UNKNOWN_999")
+	if resUnregistered.Success {
+		t.Errorf("Expected swipe to fail for unknown card")
+	}
+	if resUnregistered.EventType != "unregistered" {
+		t.Errorf("Expected eventType 'unregistered', got '%s'", resUnregistered.EventType)
+	}
+	if !strings.Contains(resUnregistered.ErrorMessage, "未登録のカードです") || !strings.Contains(resUnregistered.ErrorMessage, "UNKNOWN_999") {
+		t.Errorf("Unexpected error message: %s", resUnregistered.ErrorMessage)
+	}
+	if resUnregistered.SoundType != "booboo" {
+		t.Errorf("Expected booboo sound, got %s", resUnregistered.SoundType)
+	}
+
+	// 4. access_logs にスナップショットが記録されているか検証
+	logs, err := mgr.GetRecentLogs(10)
+	if err != nil || len(logs) < 2 {
+		t.Fatalf("Expected at least 2 logs, got %d", len(logs))
+	}
+	// 最新は UNKNOWN_999
+	if logs[0].EventType != "unregistered" || logs[0].CardID != "UNKNOWN_999" {
+		t.Errorf("Unexpected latest log: %+v", logs[0])
+	}
+	// その前は PAST_CARD_001 (今年度未登録)
+	if logs[1].EventType != "unregistered_renewal" || logs[1].UserName != "昨年度 太郎" || logs[1].StudentNo != "B2025001" {
+		t.Errorf("Unexpected renewal log snapshot: %+v", logs[1])
+	}
+
+	// 5. 在室者数・月別統計から未登録打刻が除外されていることを検証
+	stats, err := mgr.GetDashboardStats()
+	if err != nil {
+		t.Fatalf("GetDashboardStats failed: %v", err)
+	}
+	if stats.CurrentInsideCount != 0 {
+		t.Errorf("CurrentInsideCount should be 0, got %d", stats.CurrentInsideCount)
+	}
+	if stats.TodayLogCount != 0 {
+		t.Errorf("TodayLogCount should be 0 (unregistered excluded), got %d", stats.TodayLogCount)
+	}
+
+	// 6. 今年度への登録更新 (ワンクリック更新の動作検証)
+	currentUser := &db.RegisteredUser{
+		CardID:     pastUser.CardID,
+		FiscalYear: currentFY,
+		Name:       pastUser.Name,
+		Furigana:   pastUser.Furigana,
+		RoleName:   pastUser.RoleName,
+		RoleCode:   pastUser.RoleCode,
+		StudentNo:  pastUser.StudentNo,
+		Purpose:    pastUser.Purpose,
+	}
+	if err := mgr.UpsertUser(currentUser); err != nil {
+		t.Fatalf("Failed to upsert user for current fiscal year: %v", err)
+	}
+
+	// 今年度登録後の打刻 -> デバウンス待機後に打刻して成功することを確認
+	time.Sleep(2100 * time.Millisecond)
+	resCurrent := svc.ProcessSwipe("PAST_CARD_001")
+	if !resCurrent.Success {
+		t.Errorf("Expected swipe to succeed after renewal, got error: %s", resCurrent.ErrorMessage)
+	}
+	if resCurrent.EventType != "entry" {
+		t.Errorf("Expected eventType 'entry', got '%s'", resCurrent.EventType)
+	}
+
+	// 7. 未登録カード (UNKNOWN_999) を新規登録した際、過去ログにユーザー情報が適応されるか検証 (43prompt要件)
+	newUnknownUser := &db.RegisteredUser{
+		CardID:     "UNKNOWN_999",
+		FiscalYear: currentFY,
+		Name:       "新規 太郎",
+		Furigana:   "シンキ タロウ",
+		RoleName:   "学生",
+		RoleCode:   1,
+		StudentNo:  "B2026999",
+		Purpose:    "自習・研究",
+	}
+	if err := mgr.UpsertUser(newUnknownUser); err != nil {
+		t.Fatalf("Failed to upsert new user: %v", err)
+	}
+
+	logsAfterAdapt, err := mgr.GetRecentLogs(10)
+	if err != nil {
+		t.Fatalf("Failed to get logs after adaptation: %v", err)
+	}
+	var adaptedLog *db.AccessLog
+	for i := range logsAfterAdapt {
+		if logsAfterAdapt[i].CardID == "UNKNOWN_999" && logsAfterAdapt[i].EventType == "unregistered" {
+			adaptedLog = &logsAfterAdapt[i]
+			break
+		}
+	}
+	if adaptedLog == nil {
+		t.Fatalf("Expected to find unregistered log for UNKNOWN_999")
+	}
+	if adaptedLog.UserName != "新規 太郎" {
+		t.Errorf("Expected adapted UserName '新規 太郎', got '%s'", adaptedLog.UserName)
+	}
+	if adaptedLog.StudentNo != "B2026999" {
+		t.Errorf("Expected adapted StudentNo 'B2026999', got '%s'", adaptedLog.StudentNo)
+	}
+	if adaptedLog.Purpose != "自習・研究" {
+		t.Errorf("Expected adapted Purpose '自習・研究', got '%s'", adaptedLog.Purpose)
+	}
+}

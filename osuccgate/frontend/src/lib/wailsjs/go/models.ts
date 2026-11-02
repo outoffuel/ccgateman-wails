@@ -135,6 +135,7 @@ export namespace db {
 	}
 	export class RegisteredUser {
 	    cardId: string;
+	    fiscalYear: number;
 	    name: string;
 	    furigana: string;
 	    gender: string;
@@ -156,6 +157,7 @@ export namespace db {
 	    constructor(source: any = {}) {
 	        if ('string' === typeof source) source = JSON.parse(source);
 	        this.cardId = source["cardId"];
+	        this.fiscalYear = source["fiscalYear"];
 	        this.name = source["name"];
 	        this.furigana = source["furigana"];
 	        this.gender = source["gender"];

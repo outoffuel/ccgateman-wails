@@ -5,9 +5,15 @@
   import { formatLogTime } from '../../utils/date.js';
 
   export let logs = [];
+  export let processedLogs = null;
+  export let availableFiscalYears = [2026];
+  export let selectedFiscalYear = 2026;
+  export let onSelectFiscalYear = () => {};
+  export let onRenewalUser = () => {};
+  export let onRegisterUnregistered = () => {};
 
   // 列幅リサイズ
-  let logsWidths = { timestamp: 160, displayId: 110, userName: 130, result: 75, roleName: 100, purpose: 130, eventType: 85, duration: 110 };
+  let logsWidths = { timestamp: 155, displayId: 105, userName: 120, result: 70, roleName: 95, purpose: 120, eventType: 95, duration: 95, action: 105 };
   let isResizing = false;
   let activeResizeCol = null;
   let startX = 0;
@@ -65,16 +71,30 @@
   let logPageInput = 1;
   const LOGS_PER_PAGE = 10;
 
-  $: processedLogs = (logs || []).map(l => {
+  $: effectiveLogs = processedLogs ?? (logs || []).map(l => {
     const formatted = formatLogTime(l.timestamp);
-    const typeLabel = l.eventType === 'entry' ? '入室' : (l.eventType === 'force_exit' ? '強制退室' : '退室');
-    const result = (l.userName && l.userName !== '未登録') ? '成功' : '失敗';
+    const hasRegisteredUser = l.userName && l.userName !== '未登録';
+
+    let typeLabel = '入室';
+    let result = hasRegisteredUser ? '成功' : '失敗';
+
+    if (l.eventType === 'exit') {
+      typeLabel = '退室';
+    } else if (l.eventType === 'force_exit') {
+      typeLabel = '強制退室';
+    } else if (l.eventType === 'unregistered_renewal') {
+      typeLabel = hasRegisteredUser ? '今年度未登録(登録済)' : '今年度未登録';
+      result = hasRegisteredUser ? '登録済' : '失敗';
+    } else if (l.eventType === 'unregistered') {
+      typeLabel = hasRegisteredUser ? '未登録(登録済)' : '未登録';
+      result = hasRegisteredUser ? '登録済' : '失敗';
+    }
     const displayId = l.studentNo || l.cardId || '';
     const purpose = l.purpose || '';
-    return { ...l, formatted, typeLabel, result, displayId, purpose };
+    return { ...l, formatted, typeLabel, result, displayId, purpose, isRegistered: Boolean(hasRegisteredUser) };
   });
 
-  $: sortedLogs = sortList(processedLogs, logsSortKey, logsSortDir);
+  $: sortedLogs = sortList(effectiveLogs, logsSortKey, logsSortDir);
 
   $: filteredLogs = sortedLogs.filter(log => {
     const dateStr = log.formatted.split(' ')[0].replace(/\//g, '-');
@@ -137,6 +157,7 @@
     document.body.appendChild(link);
     link.click();
     document.body.removeChild(link);
+    URL.revokeObjectURL(url);
   }
 </script>
 
@@ -146,15 +167,32 @@
       <h2 class="text-xl font-bold text-slate-800">入退室履歴</h2>
       <p class="text-xs text-slate-500 mt-0.5">クリエイトセンターへのすべての入退室ログを検索・一覧確認できます（列ヘッダーでソート・リサイズ可能）</p>
     </div>
-    <button 
-      on:click={exportLogsCSV}
-      class="px-4 py-2 bg-emerald-600 hover:bg-emerald-700 text-white rounded-xl text-xs font-bold transition shadow-xs flex items-center justify-center gap-1.5"
-    >
-      <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 10v6m0 0l-3-3m3 3l3-3m2 8H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z"/>
-      </svg>
-      CSV出力
-    </button>
+    <div class="flex items-center gap-3">
+      <!-- 表示年度プルダウン (要件4) -->
+      <div class="flex items-center gap-1.5 bg-white border border-slate-300 rounded-xl px-3 py-1.5 shadow-xs">
+        <label for="logs-fiscal-year-select" class="text-xs font-bold text-slate-600 whitespace-nowrap">表示年度:</label>
+        <select 
+          id="logs-fiscal-year-select" 
+          value={selectedFiscalYear} 
+          on:change={(e) => onSelectFiscalYear(Number(e.target.value))}
+          class="text-xs font-bold text-blue-700 bg-transparent focus:outline-none cursor-pointer"
+        >
+          {#each availableFiscalYears as fy}
+            <option value={fy}>{fy}年度</option>
+          {/each}
+        </select>
+      </div>
+
+      <button 
+        on:click={exportLogsCSV}
+        class="px-4 py-2 bg-emerald-600 hover:bg-emerald-700 text-white rounded-xl text-xs font-bold transition shadow-xs flex items-center justify-center gap-1.5"
+      >
+        <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+          <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 10v6m0 0l-3-3m3 3l3-3m2 8H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z"/>
+        </svg>
+        CSV出力
+      </button>
+    </div>
   </div>
 
   <!-- 検索・絞り込みエリア -->
@@ -286,12 +324,20 @@
               </div>
               <div class="absolute right-0 top-0 bottom-0 w-2 cursor-col-resize hover:bg-blue-400/40" on:mousedown={(e) => startResize(e, 'duration')}></div>
             </th>
+
+            <!-- 9. 操作 -->
+            <th style="width: {logsWidths.action}px;" class="px-4 py-3.5 text-center relative group select-none">
+              <div class="flex items-center justify-center">
+                <span>操作</span>
+              </div>
+              <div class="absolute right-0 top-0 bottom-0 w-2 cursor-col-resize hover:bg-blue-400/40" on:mousedown={(e) => startResize(e, 'action')}></div>
+            </th>
           </tr>
         </thead>
         <tbody class="divide-y divide-slate-100">
           {#if paginatedLogs.length === 0}
             <tr>
-              <td colspan="8" class="px-6 py-10 text-center text-slate-400 font-medium">条件に一致する履歴はありません。</td>
+              <td colspan="9" class="px-6 py-10 text-center text-slate-400 font-medium">条件に一致する履歴はありません。</td>
             </tr>
           {:else}
             {#each paginatedLogs as log}
@@ -300,18 +346,61 @@
                 <td class="px-5 py-3.5 font-mono text-slate-500 font-semibold">{log.displayId || '-'}</td>
                 <td class="px-5 py-3.5 font-bold text-slate-800">{log.userName || '未登録'}</td>
                 <td class="px-4 py-3.5 text-center">
-                  <span class="inline-block px-2 py-0.5 rounded text-[11px] font-bold {log.result === '成功' ? 'bg-emerald-50 text-emerald-700 border border-emerald-200' : 'bg-rose-50 text-rose-700 border border-rose-200'}">
+                  <span class="inline-block px-2 py-0.5 rounded text-[11px] font-bold {(log.result === '成功' || log.result === '登録済') ? 'bg-emerald-50 text-emerald-700 border border-emerald-200' : 'bg-rose-50 text-rose-700 border border-rose-200'}">
                     {log.result}
                   </span>
                 </td>
                 <td class="px-5 py-3.5 text-slate-600">{log.roleName || '-'}</td>
                 <td class="px-5 py-3.5 text-slate-500 truncate max-w-[140px]">{log.purpose || '-'}</td>
                 <td class="px-4 py-3.5 text-center">
-                  <span class="inline-block px-2.5 py-0.5 rounded text-xs font-bold {log.eventType === 'entry' ? 'bg-blue-100 text-blue-700' : (log.eventType === 'force_exit' ? 'bg-amber-100 text-amber-700' : 'bg-rose-100 text-rose-700')}">
-                    {log.typeLabel}
-                  </span>
+                  {#if log.eventType === 'unregistered_renewal'}
+                    <span class="inline-block px-2.5 py-0.5 rounded text-[11px] font-bold {log.isRegistered ? 'bg-sky-100 text-sky-800 border border-sky-300' : 'bg-amber-100 text-amber-800 border border-amber-300'}">
+                      {log.typeLabel}
+                    </span>
+                  {:else if log.eventType === 'unregistered'}
+                    <span class="inline-block px-2.5 py-0.5 rounded text-[11px] font-bold {log.isRegistered ? 'bg-sky-100 text-sky-800 border border-sky-300' : 'bg-rose-100 text-rose-700 border border-rose-300'}">
+                      {log.typeLabel}
+                    </span>
+                  {:else}
+                    <span class="inline-block px-2.5 py-0.5 rounded text-xs font-bold {log.eventType === 'entry' ? 'bg-blue-100 text-blue-700' : (log.eventType === 'force_exit' ? 'bg-amber-100 text-amber-700' : 'bg-rose-100 text-rose-700')}">
+                      {log.typeLabel}
+                    </span>
+                  {/if}
                 </td>
                 <td class="px-5 py-3.5 text-slate-500">{log.durationText || '-'}</td>
+                <td class="px-4 py-3.5 text-center whitespace-nowrap">
+                  {#if log.eventType === 'unregistered_renewal'}
+                    {#if log.isRegistered}
+                      <span class="inline-flex items-center gap-1 text-[11px] font-bold text-emerald-600 bg-emerald-50 px-2 py-0.5 rounded border border-emerald-200">
+                        ✓ 登録済
+                      </span>
+                    {:else}
+                      <button
+                        on:click={() => onRenewalUser(log)}
+                        class="inline-flex items-center gap-1 px-2.5 py-1 bg-amber-500 hover:bg-amber-600 text-white rounded-lg text-[11px] font-bold shadow-xs transition"
+                        title="前年度の登録情報を引き継いで今年度登録を更新"
+                      >
+                        <span>🔄</span> 登録更新
+                      </button>
+                    {/if}
+                  {:else if log.eventType === 'unregistered'}
+                    {#if log.isRegistered}
+                      <span class="inline-flex items-center gap-1 text-[11px] font-bold text-emerald-600 bg-emerald-50 px-2 py-0.5 rounded border border-emerald-200">
+                        ✓ 登録済
+                      </span>
+                    {:else}
+                      <button
+                        on:click={() => onRegisterUnregistered(log)}
+                        class="inline-flex items-center gap-1 px-2.5 py-1 bg-blue-600 hover:bg-blue-700 text-white rounded-lg text-[11px] font-bold shadow-xs transition"
+                        title="読み取られたカードIDで新規登録"
+                      >
+                        <span>＋</span> 新規登録
+                      </button>
+                    {/if}
+                  {:else}
+                    <span class="text-slate-400">-</span>
+                  {/if}
+                </td>
               </tr>
             {/each}
           {/if}

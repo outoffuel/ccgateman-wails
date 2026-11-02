@@ -10,23 +10,29 @@ export function CheckUpdate():Promise<updater.ReleaseInfo>;
 
 export function ClearAllLogs():Promise<void>;
 
-export function DeleteUser(arg1:string):Promise<void>;
+export function DeleteUser(arg1:string,arg2:number):Promise<void>;
 
 export function ExportFiscalYearLogsCSV(arg1:number):Promise<string>;
 
+export function FindUserInAnyFiscalYear(arg1:string):Promise<db.RegisteredUser>;
+
 export function ForceExitAllInside():Promise<number>;
 
-export function GetAllUsers():Promise<Array<db.RegisteredUser>>;
+export function GetAllUsers(arg1:number):Promise<Array<db.RegisteredUser>>;
 
 export function GetAppVersion():Promise<string>;
 
+export function GetAvailableFiscalYears():Promise<Array<number>>;
+
+export function GetCurrentFiscalYear():Promise<number>;
+
 export function GetCurrentInsideUsers():Promise<Array<db.UserStatus>>;
 
-export function GetDashboardStats():Promise<db.DashboardStats>;
+export function GetDashboardStats(arg1:number):Promise<db.DashboardStats>;
 
-export function GetMonthlyStats():Promise<db.MonthlyStatsResponse>;
+export function GetMonthlyStats(arg1:number):Promise<db.MonthlyStatsResponse>;
 
-export function GetRecentLogs(arg1:number):Promise<Array<db.AccessLog>>;
+export function GetRecentLogs(arg1:number,arg2:number):Promise<Array<db.AccessLog>>;
 
 export function ImportLogsCSV():Promise<string>;
 

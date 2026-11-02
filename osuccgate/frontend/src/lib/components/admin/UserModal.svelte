@@ -1,7 +1,10 @@
 <script>
+  import { tick } from 'svelte';
+
   export let isOpen = false;
-  export let mode = 'create'; // 'create' | 'edit'
+  export let mode = 'create'; // 'create' | 'edit' | 'renewal'
   export let initialUser = null;
+  export let currentFiscalYear = 2026;
   export let onClose = () => {};
   export let onSave = async () => {};
 
@@ -18,7 +21,11 @@
   let formError = '';
   let isSaving = false;
 
-  $: if (isOpen) {
+  let studentNoInput;
+  let nameInput;
+  let wasOpen = false;
+
+  function initForm() {
     if (mode === 'edit' && initialUser) {
       formStudentNo = initialUser.studentNo || '';
       formName = initialUser.name || '';
@@ -30,6 +37,30 @@
       formContact = initialUser.contact || '';
       formPurpose = initialUser.purpose || '';
       formAdminNo = initialUser.adminNo || '';
+    } else if (mode === 'renewal' && initialUser) {
+      // 過去年度からの更新: 前年度の登録情報を引き継ぎ、管理番号は今年度の連番で自動採番するため空欄にする
+      formStudentNo = initialUser.studentNo || '';
+      formName = initialUser.name || '';
+      formFurigana = initialUser.furigana || '';
+      formGender = initialUser.gender || '男';
+      formRoleName = initialUser.roleName || '学生';
+      formRoleCode = initialUser.roleCode ?? (initialUser.roleName === '教職員' ? 0 : initialUser.roleName === '学生スタッフ' ? 9 : 1);
+      formCardId = initialUser.cardId || '';
+      formContact = initialUser.contact || '';
+      formPurpose = initialUser.purpose || '';
+      formAdminNo = ''; // 今年度の新規採番
+    } else if (mode === 'create' && initialUser) {
+      // 未登録カードからの新規登録: 渡されたカードID/学籍番号を自動セット
+      formStudentNo = initialUser.studentNo || initialUser.cardId || '';
+      formName = initialUser.name || '';
+      formFurigana = initialUser.furigana || '';
+      formGender = initialUser.gender || '男';
+      formRoleName = initialUser.roleName || '学生';
+      formRoleCode = initialUser.roleCode ?? 1;
+      formCardId = initialUser.cardId || '';
+      formContact = initialUser.contact || '';
+      formPurpose = initialUser.purpose || '';
+      formAdminNo = '';
     } else {
       formStudentNo = '';
       formName = '';
@@ -44,6 +75,30 @@
     }
     formError = '';
     isSaving = false;
+
+    // 開いた直後に適切な入力欄にフォーカスを当てる (WebKitGTK/Linux対応)
+    tick().then(() => {
+      if (formStudentNo && !formName) {
+        nameInput?.focus();
+      } else {
+        studentNoInput?.focus();
+      }
+    });
+    setTimeout(() => {
+      if (formStudentNo && !formName) {
+        nameInput?.focus();
+      } else {
+        studentNoInput?.focus();
+      }
+    }, 60);
+  }
+
+  // モーダルが「閉じた状態から開いた瞬間」のみ初期化を実行 (入力中の上書きリセットを防止)
+  $: if (isOpen && !wasOpen) {
+    wasOpen = true;
+    initForm();
+  } else if (!isOpen && wasOpen) {
+    wasOpen = false;
   }
 
   function handleRoleChange() {
@@ -65,6 +120,7 @@
     const finalCardId = formCardId.trim() || formStudentNo.trim();
     const userData = {
       cardId: finalCardId,
+      fiscalYear: currentFiscalYear,
       studentNo: formStudentNo.trim(),
       name: formName.trim(),
       furigana: formFurigana.trim(),
@@ -90,12 +146,18 @@
 </script>
 
 {#if isOpen}
-  <div class="fixed inset-0 z-50 flex items-center justify-center bg-slate-900/50 backdrop-blur-xs p-4">
-    <div class="bg-white rounded-2xl shadow-2xl border border-slate-200 w-full max-w-lg overflow-hidden max-h-[90vh] flex flex-col">
+  <div 
+    class="fixed inset-0 z-50 flex items-center justify-center bg-slate-900/50 backdrop-blur-xs p-4 select-auto"
+    on:click|self={onClose}
+  >
+    <div 
+      class="bg-white rounded-2xl shadow-2xl border border-slate-200 w-full max-w-lg overflow-hidden max-h-[90vh] flex flex-col select-text"
+      on:click|stopPropagation
+    >
       <!-- モーダルヘッダー -->
       <div class="px-6 py-4 border-b border-slate-100 flex items-center justify-between bg-slate-50">
         <h3 class="text-base font-bold text-slate-800">
-          {mode === 'create' ? '利用者新規登録' : '利用者情報の編集'}
+          {mode === 'create' ? '利用者新規登録' : (mode === 'renewal' ? `利用者登録の更新（${currentFiscalYear}年度）` : '利用者情報の編集')}
         </h3>
         <button on:click={onClose} class="text-slate-400 hover:text-slate-600 p-1 rounded-lg">
           <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
@@ -120,6 +182,7 @@
           <input 
             id="form-student-no"
             type="text" 
+            bind:this={studentNoInput}
             bind:value={formStudentNo} 
             required 
             placeholder="例: A0012345 (カードIDが空の場合はこの番号が照合に使われます)" 
@@ -135,6 +198,7 @@
           <input 
             id="form-name"
             type="text" 
+            bind:this={nameInput}
             bind:value={formName} 
             required 
             placeholder="例: 山田 太郎" 
@@ -236,7 +300,7 @@
             disabled={isSaving}
             class="px-5 py-2 bg-blue-600 hover:bg-blue-700 text-white rounded-lg text-xs font-bold shadow-sm disabled:opacity-50"
           >
-            {isSaving ? '保存中...' : (mode === 'create' ? '登録' : '保存')}
+            {isSaving ? '保存中...' : (mode === 'create' ? '登録' : (mode === 'renewal' ? '今年度として登録' : '保存'))}
           </button>
         </div>
       </form>

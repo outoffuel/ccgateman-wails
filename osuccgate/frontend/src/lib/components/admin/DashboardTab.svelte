@@ -5,7 +5,12 @@
   export let insideUsers = [];
   export let processedLogs = [];
   export let monthlyStatsRows = [];
+  export let availableFiscalYears = [2026];
+  export let selectedFiscalYear = 2026;
+  export let onSelectFiscalYear = () => {};
   export let onNavigateToLogs = () => {};
+  export let onRenewalUser = () => {};
+  export let onRegisterUnregistered = () => {};
 
   $: todayDateStr = getTodayDateStr();
   $: todayDateSlash = todayDateStr.replace(/-/g, '/');
@@ -29,7 +34,7 @@
     return diffDays >= 0 && diffDays <= 7;
   });
   $: weekEntries = weekLogs.filter(l => l.eventType === 'entry').length;
-  $: weekExits = weekLogs.filter(l => l.eventType !== 'entry').length;
+  $: weekExits = weekLogs.filter(l => l.eventType !== 'entry' && l.eventType !== 'unregistered' && l.eventType !== 'unregistered_renewal').length;
   $: weekTotalCount = stats?.weekLogCount || (weekEntries + weekExits);
 
   // 3. 月間の入退室数 (当月1日以降)
@@ -40,87 +45,90 @@
     return false;
   });
   $: monthEntries = monthLogs.filter(l => l.eventType === 'entry').length;
-  $: monthExits = monthLogs.filter(l => l.eventType !== 'entry').length;
+  $: monthExits = monthLogs.filter(l => l.eventType !== 'entry' && l.eventType !== 'unregistered' && l.eventType !== 'unregistered_renewal').length;
   $: monthTotalCount = stats?.monthLogCount || (monthEntries + monthExits);
 
-  // 4. 年間の入退室数 (今年度4月1日以降 または 全期間累計)
+  // 4. 年間の入退室数 (選択年度4月1日以降 または 当該年度累計)
   $: currentYearNum = new Date().getFullYear();
   $: currentFiscalYear = new Date().getMonth() < 3 ? currentYearNum - 1 : currentYearNum;
+  $: activeFiscalYear = selectedFiscalYear || currentFiscalYear;
   $: yearTotalCount = stats?.yearLogCount || (monthlyStatsRows.length > 0 
-    ? monthlyStatsRows.filter(r => r.fiscalYear === currentFiscalYear).reduce((acc, r) => acc + r.monthlyTotal, 0)
-    : processedLogs.length);
+    ? monthlyStatsRows.filter(r => r.fiscalYear === activeFiscalYear).reduce((acc, r) => acc + r.monthlyTotal, 0)
+    : processedLogs.filter(l => l.eventType !== 'unregistered' && l.eventType !== 'unregistered_renewal').length);
 
   // グラフ表示期間 ('week' | 'month' | 'year')
   let chartPeriod = 'week';
 
-  // [週グラフ] 直近7日間の日別データ
-  $: weekChartData = Array.from({ length: 7 }, (_, i) => {
-    const d = new Date();
-    d.setDate(d.getDate() - (6 - i));
-    const y = d.getFullYear();
-    const m = String(d.getMonth() + 1).padStart(2, '0');
-    const day = String(d.getDate()).padStart(2, '0');
-    const dateStr = `${y}-${m}-${day}`;
-    const slashStr = `${y}/${m}/${day}`;
-    const dayOfWeek = ['日', '月', '火', '水', '木', '金', '土'][d.getDay()];
+  // 現在アクティブなグラフデータを、選択された期間のみオンデマンド計算
+  $: currentChartList = (() => {
+    if (chartPeriod === 'week') {
+      return Array.from({ length: 7 }, (_, i) => {
+        const d = new Date();
+        d.setDate(d.getDate() - (6 - i));
+        const y = d.getFullYear();
+        const m = String(d.getMonth() + 1).padStart(2, '0');
+        const day = String(d.getDate()).padStart(2, '0');
+        const dateStr = `${y}-${m}-${day}`;
+        const slashStr = `${y}/${m}/${day}`;
+        const dayOfWeek = ['日', '月', '火', '水', '木', '金', '土'][d.getDay()];
 
-    const dayLogs = processedLogs.filter(l => {
-      if (l.formatted && l.formatted.startsWith(slashStr)) return true;
-      if (l.timestamp && String(l.timestamp).startsWith(dateStr)) return true;
-      return false;
+        const dayLogs = processedLogs.filter(l => {
+          if (l.formatted && l.formatted.startsWith(slashStr)) return true;
+          if (l.timestamp && String(l.timestamp).startsWith(dateStr)) return true;
+          return false;
+        });
+
+        const entries = dayLogs.filter(l => l.eventType === 'entry').length;
+        const exits = dayLogs.filter(l => l.eventType !== 'entry' && l.eventType !== 'unregistered' && l.eventType !== 'unregistered_renewal').length;
+
+        return {
+          label: `${Number(m)}/${Number(day)}(${dayOfWeek})`,
+          entries,
+          exits,
+        };
+      });
+    }
+
+    if (chartPeriod === 'month') {
+      return Array.from({ length: 4 }, (_, i) => {
+        const endDaysAgo = (3 - i) * 7;
+        const startDaysAgo = endDaysAgo + 6;
+        const nowMs = Date.now();
+        const startMs = nowMs - startDaysAgo * 86400000;
+        const endMs = nowMs - endDaysAgo * 86400000;
+
+        const spanLogs = processedLogs.filter(l => {
+          if (!l.timestamp) return false;
+          const t = new Date(l.timestamp).getTime();
+          return t >= startMs && t <= endMs + 86400000;
+        });
+
+        const entries = spanLogs.filter(l => l.eventType === 'entry').length;
+        const exits = spanLogs.filter(l => l.eventType !== 'entry' && l.eventType !== 'unregistered' && l.eventType !== 'unregistered_renewal').length;
+        return {
+          label: `${4 - i}週前`,
+          entries,
+          exits,
+        };
+      });
+    }
+
+    // year
+    return [4, 5, 6, 7, 8, 9, 10, 11, 12, 1, 2, 3].map(m => {
+      const y = m >= 4 ? activeFiscalYear : activeFiscalYear + 1;
+      const ym = `${y}-${String(m).padStart(2, '0')}`;
+      const stat = monthlyStatsRows.find(r => r.yearMonth === ym);
+      const mLogs = processedLogs.filter(l => l.timestamp && String(l.timestamp).startsWith(ym) && l.eventType !== 'unregistered' && l.eventType !== 'unregistered_renewal');
+      const entries = stat ? stat.monthlyTotal : mLogs.filter(l => l.eventType === 'entry').length;
+      const exits = mLogs.filter(l => l.eventType !== 'entry' && l.eventType !== 'unregistered' && l.eventType !== 'unregistered_renewal').length;
+
+      return {
+        label: `${m}月`,
+        entries,
+        exits: exits > 0 ? exits : (entries > 0 ? Math.round(entries * 0.95) : 0),
+      };
     });
-
-    const entries = dayLogs.filter(l => l.eventType === 'entry').length;
-    const exits = dayLogs.filter(l => l.eventType !== 'entry').length;
-
-    return {
-      label: `${Number(m)}/${Number(day)}(${dayOfWeek})`,
-      entries,
-      exits,
-    };
-  });
-
-  // [月グラフ] 直近4週間ごとの推移
-  $: monthChartData = Array.from({ length: 4 }, (_, i) => {
-    const endDaysAgo = (3 - i) * 7;
-    const startDaysAgo = endDaysAgo + 6;
-    const nowMs = Date.now();
-    const startMs = nowMs - startDaysAgo * 86400000;
-    const endMs = nowMs - endDaysAgo * 86400000;
-
-    const spanLogs = processedLogs.filter(l => {
-      if (!l.timestamp) return false;
-      const t = new Date(l.timestamp).getTime();
-      return t >= startMs && t <= endMs + 86400000;
-    });
-
-    const entries = spanLogs.filter(l => l.eventType === 'entry').length;
-    const exits = spanLogs.filter(l => l.eventType !== 'entry').length;
-    return {
-      label: `${4 - i}週前`,
-      entries,
-      exits,
-    };
-  });
-
-  // [年間グラフ] 今年度（4月〜翌3月）の月別データ
-  $: yearChartData = [4, 5, 6, 7, 8, 9, 10, 11, 12, 1, 2, 3].map(m => {
-    const y = m >= 4 ? currentFiscalYear : currentFiscalYear + 1;
-    const ym = `${y}-${String(m).padStart(2, '0')}`;
-    const stat = monthlyStatsRows.find(r => r.yearMonth === ym);
-    const mLogs = processedLogs.filter(l => l.timestamp && String(l.timestamp).startsWith(ym));
-    const entries = stat ? stat.monthlyTotal : mLogs.filter(l => l.eventType === 'entry').length;
-    const exits = mLogs.filter(l => l.eventType !== 'entry').length;
-
-    return {
-      label: `${m}月`,
-      entries,
-      exits: exits > 0 ? exits : (entries > 0 ? Math.round(entries * 0.95) : 0),
-    };
-  });
-
-  // 現在アクティブなグラフデータ
-  $: currentChartList = chartPeriod === 'week' ? weekChartData : (chartPeriod === 'month' ? monthChartData : yearChartData);
+  })();
 
   // SVG描画座標計算
   $: activeHourlyChartData = currentChartList.map((slot, idx) => {
@@ -367,7 +375,7 @@
                 <th class="py-2.5 font-semibold">時刻</th>
                 <th class="py-2.5 font-semibold">氏名</th>
                 <th class="py-2.5 font-semibold text-center">区分</th>
-                <th class="py-2.5 font-semibold text-right">種類</th>
+                <th class="py-2.5 font-semibold text-right">種類 / 操作</th>
               </tr>
             </thead>
             <tbody class="divide-y divide-slate-100 font-medium">
@@ -377,11 +385,51 @@
                     {log.formatted.split(' ')[1] || log.formatted}
                   </td>
                   <td class="py-2.5 text-slate-800 font-bold">{log.userName || '-'}</td>
-                  <td class="py-2.5 text-center text-slate-600">{log.roleName || '学生'}</td>
-                  <td class="py-2.5 text-right">
-                    <span class="inline-block px-2.5 py-0.5 rounded text-[11px] font-bold {log.eventType === 'entry' ? 'bg-blue-100 text-blue-700' : (log.eventType === 'force_exit' ? 'bg-amber-100 text-amber-700' : 'bg-rose-100 text-rose-700')}">
-                      {log.typeLabel}
-                    </span>
+                  <td class="py-2.5 text-center text-slate-600">{log.roleName || '-'}</td>
+                  <td class="py-2.5 text-right whitespace-nowrap">
+                    {#if log.eventType === 'unregistered_renewal'}
+                      {#if log.isRegistered}
+                        <span class="inline-block px-2 py-0.5 rounded text-[11px] font-bold bg-sky-100 text-sky-800 border border-sky-300">
+                          {log.typeLabel}
+                        </span>
+                      {:else}
+                        <div class="inline-flex items-center gap-1.5 justify-end">
+                          <span class="inline-block px-2 py-0.5 rounded text-[11px] font-bold bg-amber-100 text-amber-800 border border-amber-300">
+                            {log.typeLabel}
+                          </span>
+                          <button
+                            on:click={() => onRenewalUser(log)}
+                            class="px-2 py-0.5 bg-amber-500 hover:bg-amber-600 text-white rounded text-[10px] font-bold transition shadow-2xs"
+                            title="前年度データを引き継いで今年度更新"
+                          >
+                            🔄 更新
+                          </button>
+                        </div>
+                      {/if}
+                    {:else if log.eventType === 'unregistered'}
+                      {#if log.isRegistered}
+                        <span class="inline-block px-2 py-0.5 rounded text-[11px] font-bold bg-sky-100 text-sky-800 border border-sky-300">
+                          {log.typeLabel}
+                        </span>
+                      {:else}
+                        <div class="inline-flex items-center gap-1.5 justify-end">
+                          <span class="inline-block px-2 py-0.5 rounded text-[11px] font-bold bg-rose-100 text-rose-700 border border-rose-300">
+                            {log.typeLabel}
+                          </span>
+                          <button
+                            on:click={() => onRegisterUnregistered(log)}
+                            class="px-2 py-0.5 bg-blue-600 hover:bg-blue-700 text-white rounded text-[10px] font-bold transition shadow-2xs"
+                            title="カードIDで新規登録"
+                          >
+                            ＋ 登録
+                          </button>
+                        </div>
+                      {/if}
+                    {:else}
+                      <span class="inline-block px-2.5 py-0.5 rounded text-[11px] font-bold {log.eventType === 'entry' ? 'bg-blue-100 text-blue-700' : (log.eventType === 'force_exit' ? 'bg-amber-100 text-amber-700' : 'bg-rose-100 text-rose-700')}">
+                        {log.typeLabel}
+                      </span>
+                    {/if}
                   </td>
                 </tr>
               {/each}
@@ -400,12 +448,28 @@
 
   <!-- 月別・区分別入退室集計テーブル (19prompt要件) -->
   <div class="bg-white rounded-xl border border-slate-200/90 shadow-sm p-6">
-    <div class="flex items-center justify-between pb-4 border-b border-slate-100">
-      <div class="flex items-center gap-2">
+    <div class="flex flex-col sm:flex-row sm:items-center justify-between pb-4 border-b border-slate-100 gap-3">
+      <div class="flex items-center gap-3">
         <h3 class="text-base font-bold text-slate-800">月別・区分別入退室記録</h3>
-        <span class="text-xs text-slate-400 font-medium">({currentFiscalYear}年度)</span>
+        <span class="text-xs text-slate-400 font-medium">({activeFiscalYear}年度)</span>
       </div>
-      <span class="text-xs text-slate-400">※単位: 回（入室打刻数）</span>
+      <div class="flex items-center gap-3">
+        <!-- 表示年度プルダウン (要件4) -->
+        <div class="flex items-center gap-1.5 bg-slate-50 border border-slate-200 rounded-lg px-2.5 py-1 text-xs">
+          <label for="dashboard-fy-select" class="font-semibold text-slate-600">表示年度:</label>
+          <select 
+            id="dashboard-fy-select"
+            value={selectedFiscalYear} 
+            on:change={(e) => onSelectFiscalYear(Number(e.target.value))}
+            class="font-bold text-blue-700 bg-transparent focus:outline-none cursor-pointer"
+          >
+            {#each availableFiscalYears as fy}
+              <option value={fy}>{fy}年度</option>
+            {/each}
+          </select>
+        </div>
+        <span class="text-xs text-slate-400">※単位: 回（入室打刻数）</span>
+      </div>
     </div>
 
     <div class="overflow-x-auto mt-4">
@@ -421,14 +485,14 @@
           </tr>
         </thead>
         <tbody class="divide-y divide-slate-100">
-          {#if monthlyStatsRows.length === 0}
+          {#if monthlyStatsRows.filter(r => r.fiscalYear === activeFiscalYear).length === 0}
             <tr>
               <td colspan="6" class="px-5 py-8 text-center text-slate-400 font-medium">
-                集計対象の入退室ログデータがありません。
+                {activeFiscalYear}年度の入退室集計データがありません。
               </td>
             </tr>
           {:else}
-            {#each monthlyStatsRows as row}
+            {#each monthlyStatsRows.filter(r => r.fiscalYear === activeFiscalYear) as row}
               <tr class="hover:bg-slate-50/80 transition">
                 <td class="px-5 py-3 font-mono font-bold text-slate-700">{row.yearMonth}</td>
                 <td class="px-4 py-3 text-center text-slate-500">{row.roleOtherCount}</td>
