@@ -3,4 +3,22 @@ dist/
 .vscode/
 .DS_Store
 .idea
+*.db
+*.db-shm
+*.db-wal
+*.db-journal
+*.sqlite
+*.sqlite3
+*.csv
+*.bak
+*.backup
+*.old
+*.tmp
+update-tmp-*
+osuccgate-update-*
+*.tar.gz
+osuccgate
+.env
+.env.*
+
 
