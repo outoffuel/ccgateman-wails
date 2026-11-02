@@ -4,6 +4,7 @@ on:
   push:
     branches:
       - master
+      - dev
     tags:
       - "v*"
 
@@ -16,18 +17,40 @@ jobs:
     runs-on: ubuntu-latest
     outputs:
       app_version: ${{ steps.gen.outputs.app_version }}
+      release_tag: ${{ steps.gen.outputs.release_tag }}
+      release_name: ${{ steps.gen.outputs.release_name }}
+      is_prerelease: ${{ steps.gen.outputs.is_prerelease }}
+      update_tag: ${{ steps.gen.outputs.update_tag }}
     steps:
       - name: Calculate version
         id: gen
         run: |
+          DATE_STR=$(TZ=Asia/Tokyo date +'%Y.%m.%d')
           if [[ "${{ github.ref }}" == refs/tags/* ]]; then
             VERSION="${{ github.ref_name }}"
+            RELEASE_TAG="${{ github.ref_name }}"
+            RELEASE_NAME="${{ github.ref_name }}"
+            IS_PRERELEASE="false"
+            UPDATE_TAG="false"
+          elif [[ "${{ github.ref }}" == "refs/heads/dev" ]]; then
+            VERSION="dev-v${DATE_STR}.${{ github.run_number }}"
+            RELEASE_TAG="dev"
+            RELEASE_NAME="${VERSION}"
+            IS_PRERELEASE="true"
+            UPDATE_TAG="true"
           else
-            DATE_STR=$(TZ=Asia/Tokyo date +'%Y.%m.%d')
             VERSION="v${DATE_STR}.${{ github.run_number }}"
+            RELEASE_TAG="latest"
+            RELEASE_NAME="${VERSION}"
+            IS_PRERELEASE="true"
+            UPDATE_TAG="true"
           fi
           echo "app_version=${VERSION}" >> "$GITHUB_OUTPUT"
-          echo "Generated version: ${VERSION}"
+          echo "release_tag=${RELEASE_TAG}" >> "$GITHUB_OUTPUT"
+          echo "release_name=${RELEASE_NAME}" >> "$GITHUB_OUTPUT"
+          echo "is_prerelease=${IS_PRERELEASE}" >> "$GITHUB_OUTPUT"
+          echo "update_tag=${UPDATE_TAG}" >> "$GITHUB_OUTPUT"
+          echo "Generated version: ${VERSION} (tag: ${RELEASE_TAG})"
 
   build:
     name: Build ${{ matrix.platform }}
@@ -97,7 +120,7 @@ jobs:
 
   release:
     name: Publish GitHub Release
-    if: github.ref == 'refs/heads/master' || startsWith(github.ref, 'refs/tags/v')
+    if: github.ref == 'refs/heads/master' || github.ref == 'refs/heads/dev' || startsWith(github.ref, 'refs/tags/v')
     needs: [version, build]
     runs-on: ubuntu-latest
     steps:
@@ -110,9 +133,9 @@ jobs:
       - name: Create release and upload binaries
         uses: softprops/action-gh-release@v2
         with:
-          tag_name: ${{ github.ref == 'refs/heads/master' && 'latest' || github.ref_name }}
-          name: ${{ github.ref == 'refs/heads/master' && needs.version.outputs.app_version || github.ref_name }}
-          prerelease: ${{ github.ref == 'refs/heads/master' }}
-          update_tag: ${{ github.ref == 'refs/heads/master' }}
+          tag_name: ${{ needs.version.outputs.release_tag }}
+          name: ${{ needs.version.outputs.release_name }}
+          prerelease: ${{ needs.version.outputs.is_prerelease == 'true' }}
+          update_tag: ${{ needs.version.outputs.update_tag == 'true' }}
           generate_release_notes: true
           files: release-assets/*
