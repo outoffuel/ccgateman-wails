@@ -5,6 +5,7 @@
   import { EventsOn, EventsOff } from '../../../wailsjs/runtime/runtime.js';
 
   export let onOpenAdmin = () => {};
+  export let isPaused = false;
 
   let swipeInput;
   let inputValue = '';
@@ -12,22 +13,33 @@
   let currentResult = null;
   let resetTimeout = null;
 
-  // 入力欄に常時フォーカスを当てる
+  // 入力欄に常時フォーカスを当てる（一時停止中はフォーカスを奪わない）
   export function focusInput() {
+    if (isPaused) return;
     if (swipeInput) {
       swipeInput.focus();
     }
   }
 
+  // isPausedが解除されたらフォーカスを復帰
+  $: if (!isPaused) {
+    focusInput();
+  }
+
   onMount(() => {
     focusInput();
 
-    // 画面のどこをクリックしてもフォーカスを維持
-    const handleClick = () => focusInput();
+    // 画面のどこをクリックしてもフォーカスを維持（一時停止中はスキップ）
+    const handleClick = () => {
+      if (!isPaused) {
+        focusInput();
+      }
+    };
     window.addEventListener('click', handleClick);
 
     // NFC PaSoRiからのバックグラウンド打刻イベントを受信
     EventsOn('card_swiped', (resp) => {
+      if (isPaused) return;
       handleSwipeResult(resp);
     });
 

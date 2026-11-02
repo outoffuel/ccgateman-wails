@@ -39,5 +39,29 @@ go.work
 # End of https://www.toptal.com/developers/gitignore/api/go
 
 # User added manualy
-*.db
 osuccgate/build/bin
+
+# SQLite database files
+*.db
+*.db-shm
+*.db-wal
+*.db-journal
+*.sqlite
+*.sqlite3
+
+# Data exports and backups (PII protection)
+*.csv
+*.bak
+*.backup
+
+# Self-update and runtime binaries / temporary files
+*.old
+*.tmp
+update-tmp-*
+osuccgate-update-*
+*.tar.gz
+osuccgate/osuccgate
+
+# Environment configuration files
+.env
+.env.*

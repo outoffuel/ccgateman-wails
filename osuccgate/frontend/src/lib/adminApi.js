@@ -1,9 +1,12 @@
 import {
+  ApplyUpdate as wailsApplyUpdate,
+  CheckUpdate as wailsCheckUpdate,
   ClearAllLogs as wailsClearAllLogs,
   DeleteUser as wailsDeleteUser,
   ExportFiscalYearLogsCSV as wailsExportFiscalYearLogsCSV,
   ForceExitAllInside as wailsForceExitAllInside,
   GetAllUsers as wailsGetAllUsers,
+  GetAppVersion as wailsGetAppVersion,
   GetCurrentInsideUsers as wailsGetCurrentInsideUsers,
   GetDashboardStats as wailsGetDashboardStats,
   GetMonthlyStats as wailsGetMonthlyStats,
@@ -154,4 +157,19 @@ export function ToggleFullscreen() {
   return document.fullscreenElement
     ? document.exitFullscreen()
     : document.documentElement.requestFullscreen();
+}
+
+export function GetAppVersion() {
+  if (isWailsAvailable()) return wailsGetAppVersion();
+  return requestJSON('/api/version').then(res => res.version).catch(() => 'dev');
+}
+
+export function CheckUpdate() {
+  if (isWailsAvailable()) return wailsCheckUpdate();
+  return requestJSON('/api/system/check-update', { method: 'POST' });
+}
+
+export function ApplyUpdate() {
+  if (isWailsAvailable()) return wailsApplyUpdate();
+  return requestJSON('/api/system/apply-update', { method: 'POST' });
 }

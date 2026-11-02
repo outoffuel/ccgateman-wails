@@ -6,11 +6,13 @@ import (
 	"log"
 	"os"
 	"path/filepath"
+	"time"
 
 	"osuccgate/internal/db"
 	"osuccgate/internal/nfc"
 	"osuccgate/internal/server"
 	"osuccgate/internal/service"
+	"osuccgate/internal/updater"
 
 	"github.com/wailsapp/wails/v2/pkg/runtime"
 )
@@ -22,13 +24,20 @@ type App struct {
 	gateService *service.GateService
 	nfcReader   *nfc.NFCReader
 	httpServer  *server.HTTPServer
+	updater     *updater.Updater
 	adminPin    string
+	appVersion  string
 }
 
 // NewApp creates a new App application struct
-func NewApp() *App {
+func NewApp(version string) *App {
+	if version == "" {
+		version = "dev"
+	}
 	return &App{
-		adminPin: "8202",
+		adminPin:   "8202",
+		appVersion: version,
+		updater:    updater.NewUpdater(version),
 	}
 }
 
@@ -50,8 +59,9 @@ func (a *App) startup(ctx context.Context) {
 	}
 	a.dbManager = dbMgr
 
-	// ゲートサービス初期化 & 23:00強制退室スケジューラ開始
+	// ゲートサービス初期化 & スケジューラ開始
 	a.gateService = service.NewGateService(dbMgr)
+	a.gateService.SetUpdater(a.updater, a.appVersion)
 	a.gateService.StartScheduler()
 
 	// NFC PaSoRi リーダーの監視開始
@@ -66,7 +76,7 @@ func (a *App) startup(ctx context.Context) {
 	a.nfcReader.Start()
 
 	// LAN向けWeb管理者サーバーの起動 (ポート 8080)
-	a.httpServer = server.NewHTTPServer(a.dbManager, a.gateService, 8080, a.adminPin, assets)
+	a.httpServer = server.NewHTTPServer(a.dbManager, a.gateService, 8080, a.adminPin, assets, a.updater, a.appVersion)
 	a.httpServer.Start()
 }
 
@@ -253,4 +263,34 @@ func (a *App) ToggleFullscreen() bool {
 	}
 	runtime.WindowFullscreen(a.ctx)
 	return true
+}
+
+// GetAppVersion アプリケーションのバージョン文字列を取得
+func (a *App) GetAppVersion() string {
+	return a.appVersion
+}
+
+// CheckUpdate 最新バージョンの有無を確認
+func (a *App) CheckUpdate() (*updater.ReleaseInfo, error) {
+	if a.updater == nil {
+		return nil, fmt.Errorf("updater is not initialized")
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+	defer cancel()
+	return a.updater.CheckForUpdate(ctx)
+}
+
+// ApplyUpdate 最新バージョンへの更新を適用して再起動
+func (a *App) ApplyUpdate() error {
+	if a.updater == nil {
+		return fmt.Errorf("updater is not initialized")
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), 3*time.Minute)
+	defer cancel()
+
+	info, err := a.updater.CheckForUpdate(ctx)
+	if err != nil {
+		return fmt.Errorf("failed to check release before updating: %w", err)
+	}
+	return a.updater.ApplyUpdate(ctx, info)
 }

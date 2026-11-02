@@ -4,6 +4,8 @@ import (
 	"embed"
 	"log"
 
+	"osuccgate/internal/updater"
+
 	"github.com/wailsapp/wails/v2"
 	"github.com/wailsapp/wails/v2/pkg/logger"
 	"github.com/wailsapp/wails/v2/pkg/options"
@@ -18,9 +20,15 @@ var assets embed.FS
 //go:embed build/appicon.png
 var icon []byte
 
+// appVersion ビルド時に -ldflags "-X main.appVersion=..." で設定される
+var appVersion = "dev"
+
 func main() {
+	// 前回の更新残骸 (.old) をクリーンアップ
+	updater.CleanupOldExecutable()
+
 	// Create an instance of the app structure
-	app := NewApp()
+	app := NewApp(appVersion)
 
 	// Create application with options
 	err := wails.Run(&options.App{

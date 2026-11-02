@@ -1,11 +1,15 @@
 <script>
+  import { onMount } from 'svelte';
   import { 
     DeleteUser, 
     ClearAllLogs, 
     ForceExitAllInside, 
     ExportFiscalYearLogsCSV,
     ImportUsersCSV,
-    ImportLogsCSV
+    ImportLogsCSV,
+    GetAppVersion,
+    CheckUpdate,
+    ApplyUpdate
   } from '../adminApi.js';
 
   export let onClose = () => {};
@@ -16,6 +20,59 @@
   let deleteCardId = '';
   let statusMessage = '';
   let isError = false;
+
+  // システムアップデート状態
+  let currentVersion = 'dev';
+  let isCheckingUpdate = false;
+  let isApplyingUpdate = false;
+  let updateInfo = null;
+  let updateCheckMessage = '';
+
+  onMount(async () => {
+    try {
+      const v = await GetAppVersion();
+      if (v) currentVersion = v;
+    } catch (e) {
+      console.warn('Failed to get app version:', e);
+    }
+  });
+
+  async function handleCheckUpdate() {
+    isCheckingUpdate = true;
+    updateCheckMessage = '';
+    isError = false;
+    updateInfo = null;
+    try {
+      const info = await CheckUpdate();
+      updateInfo = info;
+      if (info && info.hasUpdate) {
+        updateCheckMessage = `新しいバージョンが見つかりました: ${info.version}`;
+      } else {
+        updateCheckMessage = `お使いのバージョン (${currentVersion}) は最新です。`;
+      }
+    } catch (err) {
+      isError = true;
+      updateCheckMessage = '更新の確認に失敗しました: ' + (err?.message || err);
+    } finally {
+      isCheckingUpdate = false;
+    }
+  }
+
+  async function handleApplyUpdate() {
+    if (!confirm(`バージョン ${updateInfo?.version || '最新版'} にアップデートして再起動しますか？\n（更新ファイルのダウンロード後、システムが自動的に再起動します）`)) {
+      return;
+    }
+    isApplyingUpdate = true;
+    updateCheckMessage = 'アップデートをダウンロード・適用中... しばらくお待ちください';
+    try {
+      await ApplyUpdate();
+      updateCheckMessage = 'アップデートが完了しました。再起動しています...';
+    } catch (err) {
+      isError = true;
+      updateCheckMessage = 'アップデートに失敗しました: ' + (err?.message || err);
+      isApplyingUpdate = false;
+    }
+  }
 
   function handleConfirm() {
     isConfirmed = true;
@@ -173,6 +230,53 @@
             {statusMessage}
           </div>
         {/if}
+
+        <!-- 0. システムアップデート -->
+        <div class="p-4 bg-slate-800/80 rounded-2xl border border-blue-500/40 space-y-3">
+          <div class="flex flex-wrap items-center justify-between gap-2">
+            <div class="font-bold text-blue-400 text-sm flex items-center gap-2">
+              <span>🔄</span> システムアップデート (自己更新)
+            </div>
+            <div class="text-xs text-slate-300 font-mono bg-slate-900 px-2.5 py-1 rounded-lg border border-slate-700">
+              現在のバージョン: <span class="text-blue-400 font-bold">{currentVersion}</span>
+            </div>
+          </div>
+          <p class="text-xs text-slate-400">
+            GitHub Releases から最新リリースを確認し、自動で更新・再起動を行います（毎日 23:05 にも自動更新チェックが実行されます）。
+          </p>
+
+          {#if updateCheckMessage}
+            <div class={`p-2.5 rounded-xl text-xs font-mono whitespace-pre-line ${isError ? 'bg-rose-950/80 border border-rose-800 text-rose-300' : (updateInfo?.hasUpdate ? 'bg-blue-950/80 border border-blue-700 text-blue-200' : 'bg-slate-900 border border-slate-700 text-slate-300')}`}>
+              {updateCheckMessage}
+            </div>
+          {/if}
+
+          <div class="flex flex-wrap items-center gap-3 pt-1">
+            <button 
+              type="button"
+              on:click={handleCheckUpdate}
+              disabled={isCheckingUpdate || isApplyingUpdate}
+              class="bg-slate-700 hover:bg-slate-600 disabled:opacity-50 text-white text-xs font-bold py-2 px-4 rounded-xl transition shadow-xs flex items-center gap-1.5"
+            >
+              <svg class={`w-3.5 h-3.5 ${isCheckingUpdate ? 'animate-spin' : ''}`} fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15" />
+              </svg>
+              {isCheckingUpdate ? '確認中...' : '更新を確認'}
+            </button>
+
+            {#if updateInfo && updateInfo.hasUpdate}
+              <button 
+                type="button"
+                on:click={handleApplyUpdate}
+                disabled={isApplyingUpdate}
+                class="bg-emerald-600 hover:bg-emerald-500 disabled:opacity-50 text-white text-xs font-bold py-2 px-4 rounded-xl transition shadow-md shadow-emerald-600/30 flex items-center gap-1.5 animate-pulse"
+              >
+                <span>🚀</span>
+                {isApplyingUpdate ? '更新中 (再起動待機)...' : `今すぐ更新して再起動 (${updateInfo.version})`}
+              </button>
+            {/if}
+          </div>
+        </div>
 
         <!-- 1. CSVインポート (旧システムからのデータ移行) -->
         <div class="p-4 bg-slate-800/60 rounded-2xl border border-slate-700/60 space-y-3">

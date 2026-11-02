@@ -8,6 +8,7 @@ import (
 	"log"
 	"osuccgate/internal/db"
 	"osuccgate/internal/nfc"
+	"osuccgate/internal/updater"
 	"sort"
 	"strconv"
 	"strings"
@@ -42,6 +43,10 @@ type GateService struct {
 
 	schedulerCancel context.CancelFunc
 	lastForceExitDay string // 23:00二重実行防止用 ("2026-08-28")
+	lastAutoUpdateDay string // 23:05二重実行防止用 ("2026-08-28")
+
+	updater    *updater.Updater
+	appVersion string
 }
 
 func NewGateService(dbMgr *db.DBManager) *GateService {
@@ -49,10 +54,17 @@ func NewGateService(dbMgr *db.DBManager) *GateService {
 		dbManager:   dbMgr,
 		lastSwipes:  make(map[string]time.Time),
 		debounceSec: 2 * time.Second, // 要件: 2秒間の待機（受付不可）時間
+		appVersion:  "dev",
 	}
 }
 
-// StartScheduler 23:00強制退室スケジューラーの開始
+// SetUpdater 自動更新用インスタンスとバージョンを設定
+func (s *GateService) SetUpdater(u *updater.Updater, version string) {
+	s.updater = u
+	s.appVersion = version
+}
+
+// StartScheduler 23:00強制退室 & 23:05自動アップデートスケジューラーの開始
 func (s *GateService) StartScheduler() {
 	ctx, cancel := context.WithCancel(context.Background())
 	s.schedulerCancel = cancel
@@ -66,8 +78,9 @@ func (s *GateService) StartScheduler() {
 			case <-ctx.Done():
 				return
 			case now := <-ticker.C:
-				// 毎日 23:00 (23時00分〜23時01分の間) にチェック
 				todayStr := now.Format("2006-01-02")
+
+				// 1. 毎日 23:00 (23時00分〜23時01分の間) に強制退室チェック
 				if now.Hour() == 23 && now.Minute() == 0 {
 					if s.lastForceExitDay != todayStr {
 						s.lastForceExitDay = todayStr
@@ -77,6 +90,35 @@ func (s *GateService) StartScheduler() {
 							log.Printf("[Scheduler] Error during automatic force exit: %v", err)
 						} else {
 							log.Printf("[Scheduler] Automatic force exit completed. Processed %d users.", count)
+						}
+					}
+				}
+
+				// 2. 毎日 23:05 に自動アップデートチェック (dev環境はスキップ)
+				if now.Hour() == 23 && now.Minute() == 5 {
+					if s.lastAutoUpdateDay != todayStr {
+						s.lastAutoUpdateDay = todayStr
+						if s.appVersion != "dev" && s.updater != nil {
+							log.Printf("[Scheduler] 23:05 reached. Checking for automatic update...")
+							go func() {
+								updateCtx, updateCancel := context.WithTimeout(context.Background(), 3*time.Minute)
+								defer updateCancel()
+								info, err := s.updater.CheckForUpdate(updateCtx)
+								if err != nil {
+									log.Printf("[Scheduler] Update check failed: %v", err)
+									return
+								}
+								if info.HasUpdate && info.AssetURL != "" {
+									log.Printf("[Scheduler] New version found (%s). Applying automatic update...", info.Version)
+									if err := s.updater.ApplyUpdate(updateCtx, info); err != nil {
+										log.Printf("[Scheduler] Failed to apply automatic update: %v", err)
+									}
+								} else {
+									log.Printf("[Scheduler] Application is up to date (current: %s)", s.appVersion)
+								}
+							}()
+						} else {
+							log.Printf("[Scheduler] 23:05: Development environment (version: %s). Skipping automatic update.", s.appVersion)
 						}
 					}
 				}
