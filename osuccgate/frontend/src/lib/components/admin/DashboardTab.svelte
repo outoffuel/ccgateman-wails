@@ -1,133 +1,102 @@
 <script>
-  import { getTodayDateStr } from '../../utils/date.js';
-
-  export let stats = { currentInsideCount: 0, totalUserCount: 0, todayLogCount: 0, weekLogCount: 0, monthLogCount: 0, yearLogCount: 0 };
+  export let stats = {
+    fiscalYear: 2026,
+    currentInsideCount: 0,
+    totalUserCount: 0,
+    todayLogCount: 0,
+    todayEntryCount: 0,
+    todayExitCount: 0,
+    weekLogCount: 0,
+    weekEntryCount: 0,
+    weekExitCount: 0,
+    monthLogCount: 0,
+    monthEntryCount: 0,
+    monthExitCount: 0,
+    yearLogCount: 0,
+    yearEntryCount: 0,
+    yearExitCount: 0,
+    weekChart: [],
+    monthChart: [],
+    yearChart: []
+  };
   export let insideUsers = [];
   export let processedLogs = [];
   export let monthlyStatsRows = [];
   export let availableFiscalYears = [2026];
   export let selectedFiscalYear = 2026;
+  export let currentFiscalYear = 2026;
   export let onSelectFiscalYear = () => {};
   export let onNavigateToLogs = () => {};
   export let onRenewalUser = () => {};
   export let onRegisterUnregistered = () => {};
 
-  $: todayDateStr = getTodayDateStr();
-  $: todayDateSlash = todayDateStr.replace(/-/g, '/');
+  // 表示対象の年度 (選択年度に完全連動)
+  $: activeFiscalYear = selectedFiscalYear || stats?.fiscalYear || currentFiscalYear;
 
-  // 本日のログのみを抽出
-  $: todayLogs = processedLogs.filter(l => {
-    if (l.formatted && l.formatted.startsWith(todayDateSlash)) return true;
-    if (l.timestamp && String(l.timestamp).startsWith(todayDateStr)) return true;
-    return false;
-  });
-
-  // 1. 在室人数
+  // 1. 在室人数・本日内訳 (SQL集計値を使用)
   $: currentInsideNum = insideUsers ? insideUsers.length : (stats?.currentInsideCount ?? 0);
-  $: todayEntriesCount = todayLogs.filter(l => l.eventType === 'entry').length;
-  $: todayExitsCount = todayLogs.filter(l => l.eventType === 'exit' || l.eventType === 'force_exit').length;
+  $: todayEntriesCount = stats?.todayEntryCount ?? 0;
+  $: todayExitsCount = stats?.todayExitCount ?? 0;
 
-  // 2. 週間の入退室数 (直近7日間)
-  $: weekLogs = processedLogs.filter(l => {
-    if (!l.timestamp) return false;
-    const diffDays = (new Date() - new Date(l.timestamp)) / (1000 * 60 * 60 * 24);
-    return diffDays >= 0 && diffDays <= 7;
-  });
-  $: weekEntries = weekLogs.filter(l => l.eventType === 'entry').length;
-  $: weekExits = weekLogs.filter(l => l.eventType !== 'entry' && l.eventType !== 'unregistered' && l.eventType !== 'unregistered_renewal').length;
-  $: weekTotalCount = stats?.weekLogCount || (weekEntries + weekExits);
+  // 2. 週間の入退室総数 (直近7日間: SQL集計値を使用し、合計 = 入室 + 退室 を厳密に一致させる)
+  $: weekEntries = stats?.weekEntryCount ?? 0;
+  $: weekExits = stats?.weekExitCount ?? 0;
+  $: weekTotalCount = weekEntries + weekExits;
 
-  // 3. 月間の入退室数 (当月1日以降)
-  $: monthPrefix = todayDateStr.slice(0, 7);
-  $: monthLogs = processedLogs.filter(l => {
-    if (l.timestamp && String(l.timestamp).startsWith(monthPrefix)) return true;
-    if (l.formatted && l.formatted.startsWith(monthPrefix.replace('-', '/'))) return true;
-    return false;
-  });
-  $: monthEntries = monthLogs.filter(l => l.eventType === 'entry').length;
-  $: monthExits = monthLogs.filter(l => l.eventType !== 'entry' && l.eventType !== 'unregistered' && l.eventType !== 'unregistered_renewal').length;
-  $: monthTotalCount = stats?.monthLogCount || (monthEntries + monthExits);
+  // 3. 月間の入退室総数 (当月1日以降: SQL集計値を使用し、合計 = 入室 + 退室 を厳密に一致させる)
+  $: monthEntries = stats?.monthEntryCount ?? 0;
+  $: monthExits = stats?.monthExitCount ?? 0;
+  $: monthTotalCount = monthEntries + monthExits;
 
-  // 4. 年間の入退室数 (選択年度4月1日以降 または 当該年度累計)
-  $: currentYearNum = new Date().getFullYear();
-  $: currentFiscalYear = new Date().getMonth() < 3 ? currentYearNum - 1 : currentYearNum;
-  $: activeFiscalYear = selectedFiscalYear || currentFiscalYear;
-  $: yearTotalCount = stats?.yearLogCount || (monthlyStatsRows.length > 0 
-    ? monthlyStatsRows.filter(r => r.fiscalYear === activeFiscalYear).reduce((acc, r) => acc + r.monthlyTotal, 0)
-    : processedLogs.filter(l => l.eventType !== 'unregistered' && l.eventType !== 'unregistered_renewal').length);
+  // 4. 年間の入退室総数 (選択年度4月〜翌3月: SQL集計値を使用し、合計 = 入室 + 退室 を厳密に一致させる)
+  $: yearEntries = stats?.yearEntryCount ?? 0;
+  $: yearExits = stats?.yearExitCount ?? 0;
+  $: yearTotalCount = yearEntries + yearExits;
+
+  // 選択年度の月別統計行
+  $: fiscalYearMonthlyRows = (monthlyStatsRows || []).filter(r => r.fiscalYear === activeFiscalYear);
 
   // グラフ表示期間 ('week' | 'month' | 'year')
   let chartPeriod = 'week';
 
-  // 現在アクティブなグラフデータを、選択された期間のみオンデマンド計算
+  // バックエンドSQL集計によるグラフデータ (500件制限および架空推計データを完全排除)
   $: currentChartList = (() => {
     if (chartPeriod === 'week') {
+      if (stats?.weekChart && stats.weekChart.length > 0) {
+        return stats.weekChart;
+      }
       return Array.from({ length: 7 }, (_, i) => {
         const d = new Date();
         d.setDate(d.getDate() - (6 - i));
-        const y = d.getFullYear();
-        const m = String(d.getMonth() + 1).padStart(2, '0');
-        const day = String(d.getDate()).padStart(2, '0');
-        const dateStr = `${y}-${m}-${day}`;
-        const slashStr = `${y}/${m}/${day}`;
         const dayOfWeek = ['日', '月', '火', '水', '木', '金', '土'][d.getDay()];
-
-        const dayLogs = processedLogs.filter(l => {
-          if (l.formatted && l.formatted.startsWith(slashStr)) return true;
-          if (l.timestamp && String(l.timestamp).startsWith(dateStr)) return true;
-          return false;
-        });
-
-        const entries = dayLogs.filter(l => l.eventType === 'entry').length;
-        const exits = dayLogs.filter(l => l.eventType !== 'entry' && l.eventType !== 'unregistered' && l.eventType !== 'unregistered_renewal').length;
-
         return {
-          label: `${Number(m)}/${Number(day)}(${dayOfWeek})`,
-          entries,
-          exits,
+          label: `${d.getMonth() + 1}/${d.getDate()}(${dayOfWeek})`,
+          entries: 0,
+          exits: 0,
         };
       });
     }
 
     if (chartPeriod === 'month') {
-      return Array.from({ length: 4 }, (_, i) => {
-        const endDaysAgo = (3 - i) * 7;
-        const startDaysAgo = endDaysAgo + 6;
-        const nowMs = Date.now();
-        const startMs = nowMs - startDaysAgo * 86400000;
-        const endMs = nowMs - endDaysAgo * 86400000;
-
-        const spanLogs = processedLogs.filter(l => {
-          if (!l.timestamp) return false;
-          const t = new Date(l.timestamp).getTime();
-          return t >= startMs && t <= endMs + 86400000;
-        });
-
-        const entries = spanLogs.filter(l => l.eventType === 'entry').length;
-        const exits = spanLogs.filter(l => l.eventType !== 'entry' && l.eventType !== 'unregistered' && l.eventType !== 'unregistered_renewal').length;
-        return {
-          label: `${4 - i}週前`,
-          entries,
-          exits,
-        };
-      });
+      if (stats?.monthChart && stats.monthChart.length > 0) {
+        return stats.monthChart;
+      }
+      return Array.from({ length: 4 }, (_, i) => ({
+        label: `${4 - i}週前`,
+        entries: 0,
+        exits: 0,
+      }));
     }
 
-    // year
-    return [4, 5, 6, 7, 8, 9, 10, 11, 12, 1, 2, 3].map(m => {
-      const y = m >= 4 ? activeFiscalYear : activeFiscalYear + 1;
-      const ym = `${y}-${String(m).padStart(2, '0')}`;
-      const stat = monthlyStatsRows.find(r => r.yearMonth === ym);
-      const mLogs = processedLogs.filter(l => l.timestamp && String(l.timestamp).startsWith(ym) && l.eventType !== 'unregistered' && l.eventType !== 'unregistered_renewal');
-      const entries = stat ? stat.monthlyTotal : mLogs.filter(l => l.eventType === 'entry').length;
-      const exits = mLogs.filter(l => l.eventType !== 'entry' && l.eventType !== 'unregistered' && l.eventType !== 'unregistered_renewal').length;
-
-      return {
-        label: `${m}月`,
-        entries,
-        exits: exits > 0 ? exits : (entries > 0 ? Math.round(entries * 0.95) : 0),
-      };
-    });
+    // year (選択年度の4月〜翌3月実数)
+    if (stats?.yearChart && stats.yearChart.length > 0) {
+      return stats.yearChart;
+    }
+    return [4, 5, 6, 7, 8, 9, 10, 11, 12, 1, 2, 3].map(m => ({
+      label: `${m}月`,
+      entries: 0,
+      exits: 0,
+    }));
   })();
 
   // SVG描画座標計算
@@ -153,7 +122,44 @@
 </script>
 
 <div class="space-y-6">
-  <!-- 4つの統計カード横並び (週・月・年間の入退室数記録: 19prompt要件) -->
+  <!-- 年度選択バー & アーカイブ通知 -->
+  <div class="flex flex-col sm:flex-row sm:items-center justify-between gap-3 bg-white rounded-xl px-5 py-3.5 border border-slate-200/90 shadow-xs">
+    <div class="flex items-center gap-2.5 text-xs text-slate-600">
+      <span class="font-bold text-slate-800">集計対象年度：</span>
+      <span class="px-2.5 py-0.5 rounded-full font-bold bg-blue-50 text-blue-700 border border-blue-200">
+        {activeFiscalYear}年度（{activeFiscalYear}/04/01 ～ {activeFiscalYear + 1}/03/31）
+      </span>
+      {#if currentFiscalYear && activeFiscalYear !== currentFiscalYear}
+        <span class="px-2 py-0.5 rounded bg-amber-100 text-amber-800 font-bold">アーカイブ表示中</span>
+      {/if}
+    </div>
+
+    <div class="flex items-center gap-3">
+      {#if currentFiscalYear && activeFiscalYear !== currentFiscalYear}
+        <button
+          on:click={() => onSelectFiscalYear(currentFiscalYear)}
+          class="text-xs font-bold text-amber-700 hover:text-amber-900 underline"
+        >
+          今年度（{currentFiscalYear}年度）に戻る
+        </button>
+      {/if}
+      <div class="flex items-center gap-1.5 bg-slate-50 border border-slate-300 rounded-lg px-3 py-1.5 text-xs">
+        <label for="dashboard-top-fy-select" class="font-bold text-slate-600">表示年度:</label>
+        <select
+          id="dashboard-top-fy-select"
+          value={selectedFiscalYear}
+          on:change={(e) => onSelectFiscalYear(Number(e.target.value))}
+          class="font-bold text-blue-700 bg-transparent focus:outline-none cursor-pointer"
+        >
+          {#each availableFiscalYears as fy}
+            <option value={fy}>{fy}年度</option>
+          {/each}
+        </select>
+      </div>
+    </div>
+  </div>
+
+  <!-- 4つの統計カード横並び (SQL集計による正確な入室・退室・総打刻数) -->
   <div class="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-5">
     <!-- カード1：現在の在室人数 -->
     <div class="bg-white rounded-xl p-5 border border-slate-200/90 shadow-sm flex items-center justify-between">
@@ -163,7 +169,7 @@
           <span class="text-3xl font-bold text-slate-800">{currentInsideNum}</span>
           <span class="text-sm text-slate-600 font-medium">人</span>
         </div>
-        <p class="text-[11px] text-slate-400 mt-1">定員 10人</p>
+        <p class="text-[11px] text-slate-400 mt-1">本日 入室 {todayEntriesCount} / 退室 {todayExitsCount}</p>
       </div>
       <div class="w-12 h-12 rounded-xl bg-blue-50 text-blue-600 flex items-center justify-center border border-blue-100 flex-shrink-0">
         <svg class="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24">
@@ -206,15 +212,15 @@
       </div>
     </div>
 
-    <!-- カード4：年間の入退室数 -->
+    <!-- カード4：年間の入退室数 (選択年度連動 & 内訳表示) -->
     <div class="bg-white rounded-xl p-5 border border-slate-200/90 shadow-sm flex items-center justify-between">
       <div>
-        <p class="text-xs font-semibold text-slate-500 uppercase">年間の入退室数</p>
+        <p class="text-xs font-semibold text-slate-500 uppercase">年間の入退室数 ({activeFiscalYear}年度)</p>
         <div class="mt-2 flex items-baseline gap-1">
           <span class="text-3xl font-bold text-slate-800">{yearTotalCount}</span>
           <span class="text-sm text-slate-600 font-medium">回</span>
         </div>
-        <p class="text-[11px] text-slate-400 mt-1">{currentFiscalYear}年度累計</p>
+        <p class="text-[11px] text-slate-400 mt-1">{activeFiscalYear}年度累計 (入室 {yearEntries} / 退室 {yearExits})</p>
       </div>
       <div class="w-12 h-12 rounded-xl bg-amber-50 text-amber-600 flex items-center justify-center border border-amber-100 flex-shrink-0">
         <svg class="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24">
@@ -226,7 +232,7 @@
 
   <!-- グラフ & 最近の入退室履歴 -->
   <div class="grid grid-cols-1 lg:grid-cols-12 gap-6">
-    <!-- 入退室数グラフ (タイトル:「入退室数」・週 / 月 / 年間 切り替え: 19prompt要件) -->
+    <!-- 入退室数グラフ (タイトル:「入退室数」・週 / 月 / 年間 切り替え) -->
     <div class="lg:col-span-7 bg-white rounded-xl border border-slate-200/90 shadow-sm p-6 flex flex-col justify-between">
       <div>
         <div class="flex flex-wrap items-center justify-between pb-3 border-b border-slate-100 gap-3">
@@ -256,7 +262,7 @@
             </div>
             <div class="flex items-center gap-1.5">
               <span class="w-3 h-3 rounded-xs bg-rose-500"></span>
-              <span class="text-slate-600">赤：退室</span>
+              <span class="text-slate-600">赤：退室（強制退室含む）</span>
             </div>
           </div>
         </div>
@@ -286,7 +292,7 @@
               <text x="32" y="194" text-anchor="end" fill="#94a3b8">0</text>
             </g>
 
-            <!-- 各期間の棒グラフ (実際の打刻ログから動的描画) -->
+            <!-- 各期間の棒グラフ (SQL集計による実数を描画) -->
             {#each activeHourlyChartData as slot}
               <g class="group">
                 <!-- 入室バー (青) -->
@@ -344,7 +350,7 @@
       <!-- グラフ下部フッター注釈 -->
       <div class="mt-4 pt-3 border-t border-slate-100 flex items-center justify-between text-xs text-slate-500">
         <span>
-          ※表示期間: {chartPeriod === 'week' ? '週（直近7日間）' : (chartPeriod === 'month' ? '月（直近4週間）' : `${currentFiscalYear}年度（4月〜翌3月）`)}
+          ※表示期間: {chartPeriod === 'week' ? '週（直近7日間・日別実数）' : (chartPeriod === 'month' ? '月（直近4週間・週別実数）' : `${activeFiscalYear}年度（4月〜翌3月・月別実数）`)}
         </span>
         <button 
           on:click={onNavigateToLogs}
@@ -446,14 +452,14 @@
     </div>
   </div>
 
-  <!-- 月別・区分別入退室集計テーブル (19prompt要件) -->
+  <!-- 月別・区分別入退室集計テーブル (19prompt要件 & 定義統一・年度連動) -->
   <div class="bg-white rounded-xl border border-slate-200/90 shadow-sm p-6">
     <div class="flex flex-col sm:flex-row sm:items-center justify-between pb-4 border-b border-slate-100 gap-3">
       <div class="flex items-center gap-3">
         <h3 class="text-base font-bold text-slate-800">月別・区分別入退室記録</h3>
-        <span class="text-xs text-slate-400 font-medium">({activeFiscalYear}年度)</span>
+        <span class="text-xs text-slate-500 font-semibold">({activeFiscalYear}年度)</span>
       </div>
-      <div class="flex items-center gap-3">
+      <div class="flex flex-wrap items-center gap-3">
         <!-- 表示年度プルダウン (要件4) -->
         <div class="flex items-center gap-1.5 bg-slate-50 border border-slate-200 rounded-lg px-2.5 py-1 text-xs">
           <label for="dashboard-fy-select" class="font-semibold text-slate-600">表示年度:</label>
@@ -468,7 +474,7 @@
             {/each}
           </select>
         </div>
-        <span class="text-xs text-slate-400">※単位: 回（入室打刻数）</span>
+        <span class="text-xs text-slate-500">※区分内訳および当月までの合計は「入室回数（のべ利用人数）」、入退室総数は「入室＋退室」</span>
       </div>
     </div>
 
@@ -481,25 +487,34 @@
             <th class="px-4 py-3 text-center text-indigo-700">0（教職員）</th>
             <th class="px-4 py-3 text-center text-blue-700">1（学生）</th>
             <th class="px-4 py-3 text-center text-amber-700">9（スタッフ）</th>
-            <th class="px-5 py-3 text-right">当月までの合計</th>
+            <th class="px-4 py-3 text-right">当月入室計</th>
+            <th class="px-5 py-3 text-right">当月までの合計（入室累計）</th>
+            <th class="px-5 py-3 text-right text-slate-500">当月入退室総数（入室/退室）</th>
           </tr>
         </thead>
         <tbody class="divide-y divide-slate-100">
-          {#if monthlyStatsRows.filter(r => r.fiscalYear === activeFiscalYear).length === 0}
+          {#if fiscalYearMonthlyRows.length === 0}
             <tr>
-              <td colspan="6" class="px-5 py-8 text-center text-slate-400 font-medium">
+              <td colspan="8" class="px-5 py-8 text-center text-slate-400 font-medium">
                 {activeFiscalYear}年度の入退室集計データがありません。
               </td>
             </tr>
           {:else}
-            {#each monthlyStatsRows.filter(r => r.fiscalYear === activeFiscalYear) as row}
+            {#each fiscalYearMonthlyRows as row}
               <tr class="hover:bg-slate-50/80 transition">
                 <td class="px-5 py-3 font-mono font-bold text-slate-700">{row.yearMonth}</td>
                 <td class="px-4 py-3 text-center text-slate-500">{row.roleOtherCount}</td>
                 <td class="px-4 py-3 text-center font-semibold text-indigo-700">{row.role0Count}</td>
                 <td class="px-4 py-3 text-center font-semibold text-blue-700">{row.role1Count}</td>
                 <td class="px-4 py-3 text-center font-semibold text-amber-700">{row.role9Count}</td>
+                <td class="px-4 py-3 text-right font-bold text-blue-700">{row.monthlyTotal.toLocaleString()} 回</td>
                 <td class="px-5 py-3 text-right font-bold text-slate-900">{row.fiscalYearCumulativeTotal.toLocaleString()} 回</td>
+                <td class="px-5 py-3 text-right font-mono text-slate-600">
+                  {(row.monthlyLogTotal ?? (row.monthlyTotal + (row.monthlyExitCount ?? 0))).toLocaleString()} 回
+                  <span class="text-[11px] text-slate-400 ml-1">
+                    (入{row.monthlyTotal} / 退{row.monthlyExitCount ?? 0})
+                  </span>
+                </td>
               </tr>
             {/each}
           {/if}
@@ -508,4 +523,3 @@
     </div>
   </div>
 </div>
-

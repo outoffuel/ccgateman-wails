@@ -4,7 +4,6 @@
   import { formatLogTime } from '../../utils/date.js';
 
   export let insideUsers = [];
-  export let roomCapacity = 10;
   export let onOpenAdvanced = () => {};
 
   // 列幅リサイズ
@@ -61,7 +60,7 @@
   <div class="flex flex-col sm:flex-row sm:items-center justify-between gap-4">
     <div>
       <h2 class="text-xl font-bold text-slate-800">在室中メンバー</h2>
-      <p class="text-xs text-slate-500 mt-0.5">現在、施設内にいる利用者のリアルタイム状況です（定員：{roomCapacity}名）</p>
+      <p class="text-xs text-slate-500 mt-0.5">現在、施設内にいる利用者のリアルタイム状況です</p>
     </div>
     <button 
       on:click={onOpenAdvanced}

@@ -34,7 +34,7 @@ jobs:
             UPDATE_TAG="false"
           elif [[ "${{ github.ref }}" == "refs/heads/dev" ]]; then
             VERSION="dev-v${DATE_STR}.${{ github.run_number }}"
-            RELEASE_TAG="dev"
+            RELEASE_TAG="dev-latest"
             RELEASE_NAME="${VERSION}"
             IS_PRERELEASE="true"
             UPDATE_TAG="true"

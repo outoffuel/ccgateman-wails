@@ -72,14 +72,33 @@ type UserStatus struct {
 	StayDuration  string    `json:"stayDuration"` // 在室中の場合は現在までの滞在時間
 }
 
+// ChartPoint グラフ描画用の期間別入退室集計ポイント
+type ChartPoint struct {
+	Label   string `json:"label"`   // X軸ラベル ("11/3(火)", "4週前", "4月" 等)
+	Entries int    `json:"entries"` // 入室数 (event_type = 'entry')
+	Exits   int    `json:"exits"`   // 退室数 (event_type IN ('exit', 'force_exit'))
+}
+
 // DashboardStats ダッシュボード統計
 type DashboardStats struct {
-	CurrentInsideCount int `json:"currentInsideCount"` // 現在の在室者数
-	TotalUserCount     int `json:"totalUserCount"`     // 登録総数
-	TodayLogCount      int `json:"todayLogCount"`      // 本日の総入退室数
-	WeekLogCount       int `json:"weekLogCount"`       // 週間の入退室数 (直近7日間/今週)
-	MonthLogCount      int `json:"monthLogCount"`      // 月間の入退室数 (当月)
-	YearLogCount       int `json:"yearLogCount"`       // 年間の入退室数 (今年度/年間)
+	FiscalYear         int          `json:"fiscalYear"`         // 集計対象年度
+	CurrentInsideCount int          `json:"currentInsideCount"` // 現在の在室者数
+	TotalUserCount     int          `json:"totalUserCount"`     // 登録総数
+	TodayLogCount      int          `json:"todayLogCount"`      // 本日の総入退室数 (entry + exit + force_exit)
+	TodayEntryCount    int          `json:"todayEntryCount"`    // 本日の入室数 (entry)
+	TodayExitCount     int          `json:"todayExitCount"`     // 本日の退室数 (exit + force_exit)
+	WeekLogCount       int          `json:"weekLogCount"`       // 週間の総入退室数 (直近7日間: entry + exit + force_exit)
+	WeekEntryCount     int          `json:"weekEntryCount"`     // 週間の入室数 (直近7日間: entry)
+	WeekExitCount      int          `json:"weekExitCount"`      // 週間の退室数 (直近7日間: exit + force_exit)
+	MonthLogCount      int          `json:"monthLogCount"`      // 月間の総入退室数 (当月: entry + exit + force_exit)
+	MonthEntryCount    int          `json:"monthEntryCount"`    // 月間の入室数 (当月: entry)
+	MonthExitCount     int          `json:"monthExitCount"`     // 月間の退室数 (当月: exit + force_exit)
+	YearLogCount       int          `json:"yearLogCount"`       // 年間の総入退室数 (選択年度: entry + exit + force_exit)
+	YearEntryCount     int          `json:"yearEntryCount"`     // 年間の入室数 (選択年度: entry)
+	YearExitCount      int          `json:"yearExitCount"`      // 年間の退室数 (選択年度: exit + force_exit)
+	WeekChart          []ChartPoint `json:"weekChart"`          // 週別グラフ (直近7日間・日ごと)
+	MonthChart         []ChartPoint `json:"monthChart"`         // 月別グラフ (直近4週間・週ごと)
+	YearChart          []ChartPoint `json:"yearChart"`          // 年別グラフ (選択年度4月〜翌3月・月ごと)
 }
 
 // MonthlyStatRow 月別・区分別打刻統計行データ (01prompt, 19prompt要件)
@@ -89,9 +108,11 @@ type MonthlyStatRow struct {
 	Role0Count                int    `json:"role0Count"`                // "0（教職員）"
 	Role1Count                int    `json:"role1Count"`                // "1（学生）"
 	Role9Count                int    `json:"role9Count"`                // "9（スタッフ）"
-	MonthlyTotal              int    `json:"monthlyTotal"`              // 当月合計
+	MonthlyTotal              int    `json:"monthlyTotal"`              // 当月入室合計 (のべ利用回数)
+	MonthlyExitCount          int    `json:"monthlyExitCount"`          // 当月退室合計 (exit + force_exit)
+	MonthlyLogTotal           int    `json:"monthlyLogTotal"`           // 当月総打刻数 (入室 + 退室)
 	FiscalYear                int    `json:"fiscalYear"`                // 2026 (年度)
-	FiscalYearCumulativeTotal int    `json:"fiscalYearCumulativeTotal"` // 当月までの合計 (年度累計)
+	FiscalYearCumulativeTotal int    `json:"fiscalYearCumulativeTotal"` // 当月までの合計 (年度累計入室数)
 	QuarterPeriod             string `json:"quarterPeriod"`             // 四半期ラベル ("4月～6月", "7月～9月", "10月～12月", "1月～3月")
 	QuarterTotal              int    `json:"quarterTotal"`              // 当該四半期合計
 }
@@ -896,8 +917,8 @@ func (m *DBManager) GetRecentLogs(limit int, fiscalYears ...int) ([]AccessLog, e
 
 	if len(fiscalYears) > 0 && fiscalYears[0] > 0 {
 		fy := fiscalYears[0]
-		startDate := fmt.Sprintf("%d-04-01T00:00:00", fy)
-		endDate := fmt.Sprintf("%d-03-31T23:59:59", fy+1)
+		startDate := fmt.Sprintf("%04d-04-01", fy)
+		endDate := fmt.Sprintf("%04d-04-01", fy+1)
 		query = `
 		SELECT 
 			l.id, l.card_id,
@@ -908,8 +929,8 @@ func (m *DBManager) GetRecentLogs(limit int, fiscalYears ...int) ([]AccessLog, e
 			COALESCE(NULLIF(l.purpose, ''), u.purpose, '') as purpose,
 			l.event_type, l.timestamp, l.duration_second
 		FROM access_logs l
-		LEFT JOIN registered_users u ON (l.card_id = u.card_id OR (l.student_no != '' AND l.student_no = u.student_no)) AND u.fiscal_year = ?
-		WHERE l.timestamp >= ? AND l.timestamp <= ?
+		LEFT JOIN registered_users u ON l.card_id = u.card_id AND u.fiscal_year = ?
+		WHERE l.timestamp >= ? AND l.timestamp < ?
 		ORDER BY l.id DESC
 		LIMIT ?
 		`
@@ -926,7 +947,7 @@ func (m *DBManager) GetRecentLogs(limit int, fiscalYears ...int) ([]AccessLog, e
 			COALESCE(NULLIF(l.purpose, ''), u.purpose, '') as purpose,
 			l.event_type, l.timestamp, l.duration_second
 		FROM access_logs l
-		LEFT JOIN registered_users u ON (l.card_id = u.card_id OR (l.student_no != '' AND l.student_no = u.student_no)) AND u.fiscal_year = ?
+		LEFT JOIN registered_users u ON l.card_id = u.card_id AND u.fiscal_year = ?
 		ORDER BY l.id DESC
 		LIMIT ?
 		`
@@ -969,7 +990,7 @@ func (m *DBManager) GetRecentLogs(limit int, fiscalYears ...int) ([]AccessLog, e
 	return logs, nil
 }
 
-// GetDashboardStats ダッシュボード用集計データ (年度指定対応、省略時は今年度)
+// GetDashboardStats ダッシュボード用集計データ (年度指定対応、省略時は今年度、SQLによる全件正確集計)
 func (m *DBManager) GetDashboardStats(fiscalYears ...int) (*DashboardStats, error) {
 	m.mu.RLock()
 	defer m.mu.RUnlock()
@@ -979,7 +1000,12 @@ func (m *DBManager) GetDashboardStats(fiscalYears ...int) (*DashboardStats, erro
 		fy = fiscalYears[0]
 	}
 
-	stats := &DashboardStats{}
+	stats := &DashboardStats{
+		FiscalYear: fy,
+		WeekChart:  []ChartPoint{},
+		MonthChart: []ChartPoint{},
+		YearChart:  []ChartPoint{},
+	}
 
 	// 1. 指定年度のユーザー登録総数
 	err := m.db.QueryRow("SELECT COUNT(*) FROM registered_users WHERE fiscal_year = ?", fy).Scan(&stats.TotalUserCount)
@@ -990,7 +1016,7 @@ func (m *DBManager) GetDashboardStats(fiscalYears ...int) (*DashboardStats, erro
 	// 2. 現在の在室者数 (本日00:00以降にentryし、最新ログが 'entry' である件数、未登録ログ除外)
 	now := time.Now()
 	todayPrefix := now.Format("2006-01-02")
-	todayStart := todayPrefix + "T00:00:00"
+	tomorrowPrefix := now.AddDate(0, 0, 1).Format("2006-01-02")
 	queryInside := `
 	SELECT COUNT(*) FROM (
 		SELECT l.card_id, l.event_type FROM access_logs l
@@ -1000,44 +1026,160 @@ func (m *DBManager) GetDashboardStats(fiscalYears ...int) (*DashboardStats, erro
 			GROUP BY card_id
 		) latest ON l.id = latest.max_id
 		WHERE l.event_type = 'entry'
-		  AND (l.timestamp >= ? OR l.timestamp >= ? OR l.timestamp LIKE ?)
+		  AND l.timestamp >= ? AND l.timestamp < ?
 	)
 	`
-	_ = m.db.QueryRow(queryInside, todayStart, todayPrefix+" 00:00:00", todayPrefix+"%").Scan(&stats.CurrentInsideCount)
+	_ = m.db.QueryRow(queryInside, todayPrefix, tomorrowPrefix).Scan(&stats.CurrentInsideCount)
 
-	// 3. 期間別（本日・週間・月間・年間）の総打刻数を1回のクエリで統合集計 (成功した入退室ログのみ対象)
-	sevenDaysAgo := now.AddDate(0, 0, -6).Format("2006-01-02")
-	monthStart := now.Format("2006-01") + "-01"
-	fyStart := fmt.Sprintf("%d-04-01", fy)
-	fyEnd := fmt.Sprintf("%d-03-31 23:59:59", fy+1)
+	// 3. 期間別（本日・週間・月間・選択年度）の入室数・退室数をSQLで正確に集計
+	weekStart := now.AddDate(0, 0, -6).Format("2006-01-02")
+	monthStart := fmt.Sprintf("%04d-%02d-01", now.Year(), int(now.Month()))
+	nextMonthStart := time.Date(now.Year(), now.Month()+1, 1, 0, 0, 0, 0, now.Location()).Format("2006-01-02")
+	fyStart := fmt.Sprintf("%04d-04-01", fy)
+	fyNextStart := fmt.Sprintf("%04d-04-01", fy+1)
 
 	queryPeriods := `
 	SELECT
-		COUNT(CASE WHEN (timestamp >= ? OR timestamp >= ? OR timestamp LIKE ?) AND event_type IN ('entry', 'exit', 'force_exit') THEN 1 END),
-		COUNT(CASE WHEN timestamp >= ? AND event_type IN ('entry', 'exit', 'force_exit') THEN 1 END),
-		COUNT(CASE WHEN timestamp >= ? AND event_type IN ('entry', 'exit', 'force_exit') THEN 1 END),
-		COUNT(CASE WHEN timestamp >= ? AND timestamp <= ? AND event_type IN ('entry', 'exit', 'force_exit') THEN 1 END)
+		COALESCE(SUM(CASE WHEN timestamp >= ? AND timestamp < ? AND event_type = 'entry' THEN 1 ELSE 0 END), 0),
+		COALESCE(SUM(CASE WHEN timestamp >= ? AND timestamp < ? AND event_type IN ('exit', 'force_exit') THEN 1 ELSE 0 END), 0),
+		COALESCE(SUM(CASE WHEN timestamp >= ? AND timestamp < ? AND event_type = 'entry' THEN 1 ELSE 0 END), 0),
+		COALESCE(SUM(CASE WHEN timestamp >= ? AND timestamp < ? AND event_type IN ('exit', 'force_exit') THEN 1 ELSE 0 END), 0),
+		COALESCE(SUM(CASE WHEN timestamp >= ? AND timestamp < ? AND event_type = 'entry' THEN 1 ELSE 0 END), 0),
+		COALESCE(SUM(CASE WHEN timestamp >= ? AND timestamp < ? AND event_type IN ('exit', 'force_exit') THEN 1 ELSE 0 END), 0),
+		COALESCE(SUM(CASE WHEN timestamp >= ? AND timestamp < ? AND event_type = 'entry' THEN 1 ELSE 0 END), 0),
+		COALESCE(SUM(CASE WHEN timestamp >= ? AND timestamp < ? AND event_type IN ('exit', 'force_exit') THEN 1 ELSE 0 END), 0)
 	FROM access_logs
+	WHERE event_type IN ('entry', 'exit', 'force_exit')
 	`
 	err = m.db.QueryRow(queryPeriods,
-		todayStart, todayPrefix+" 00:00:00", todayPrefix+"%",
-		sevenDaysAgo,
-		monthStart,
-		fyStart, fyEnd,
+		todayPrefix, tomorrowPrefix,
+		todayPrefix, tomorrowPrefix,
+		weekStart, tomorrowPrefix,
+		weekStart, tomorrowPrefix,
+		monthStart, nextMonthStart,
+		monthStart, nextMonthStart,
+		fyStart, fyNextStart,
+		fyStart, fyNextStart,
 	).Scan(
-		&stats.TodayLogCount,
-		&stats.WeekLogCount,
-		&stats.MonthLogCount,
-		&stats.YearLogCount,
+		&stats.TodayEntryCount,
+		&stats.TodayExitCount,
+		&stats.WeekEntryCount,
+		&stats.WeekExitCount,
+		&stats.MonthEntryCount,
+		&stats.MonthExitCount,
+		&stats.YearEntryCount,
+		&stats.YearExitCount,
 	)
 	if err != nil {
 		log.Printf("[DB] Warning: failed to aggregate period stats: %v", err)
 	}
 
+	stats.TodayLogCount = stats.TodayEntryCount + stats.TodayExitCount
+	stats.WeekLogCount = stats.WeekEntryCount + stats.WeekExitCount
+	stats.MonthLogCount = stats.MonthEntryCount + stats.MonthExitCount
+	stats.YearLogCount = stats.YearEntryCount + stats.YearExitCount
+
+	// 4. 週別グラフ（直近7日間・日ごと）および月別グラフ（直近4週間・週ごと）のSQL集計
+	type entryExitCount struct {
+		entries int
+		exits   int
+	}
+	dayMap := make(map[string]entryExitCount)
+	twentyEightDaysAgo := now.AddDate(0, 0, -27).Format("2006-01-02")
+
+	rows28, err := m.db.Query(`
+		SELECT
+			substr(timestamp, 1, 10) AS day_str,
+			COUNT(CASE WHEN event_type = 'entry' THEN 1 END) AS entries,
+			COUNT(CASE WHEN event_type IN ('exit', 'force_exit') THEN 1 END) AS exits
+		FROM access_logs
+		WHERE timestamp >= ? AND timestamp < ?
+		  AND event_type IN ('entry', 'exit', 'force_exit')
+		GROUP BY day_str
+	`, twentyEightDaysAgo, tomorrowPrefix)
+	if err == nil {
+		for rows28.Next() {
+			var d string
+			var en, ex int
+			if err := rows28.Scan(&d, &en, &ex); err == nil {
+				dayMap[d] = entryExitCount{entries: en, exits: ex}
+			}
+		}
+		rows28.Close()
+	}
+
+	weekdays := []string{"日", "月", "火", "水", "木", "金", "土"}
+	for i := 0; i < 7; i++ {
+		d := now.AddDate(0, 0, -(6 - i))
+		key := d.Format("2006-01-02")
+		c := dayMap[key]
+		stats.WeekChart = append(stats.WeekChart, ChartPoint{
+			Label:   fmt.Sprintf("%d/%d(%s)", int(d.Month()), d.Day(), weekdays[d.Weekday()]),
+			Entries: c.entries,
+			Exits:   c.exits,
+		})
+	}
+
+	for i := 0; i < 4; i++ {
+		endOffset := (3 - i) * 7
+		startOffset := endOffset + 6
+		var enSum, exSum int
+		for offset := startOffset; offset >= endOffset; offset-- {
+			d := now.AddDate(0, 0, -offset)
+			key := d.Format("2006-01-02")
+			c := dayMap[key]
+			enSum += c.entries
+			exSum += c.exits
+		}
+		stats.MonthChart = append(stats.MonthChart, ChartPoint{
+			Label:   fmt.Sprintf("%d週前", 4-i),
+			Entries: enSum,
+			Exits:   exSum,
+		})
+	}
+
+	// 5. 年別グラフ（選択年度の4月〜翌3月・月ごと）のSQL集計 (架空の推計値を排除し実数を返却)
+	ymMap := make(map[string]entryExitCount)
+	rowsYear, err := m.db.Query(`
+		SELECT
+			substr(timestamp, 1, 7) AS ym,
+			COUNT(CASE WHEN event_type = 'entry' THEN 1 END) AS entries,
+			COUNT(CASE WHEN event_type IN ('exit', 'force_exit') THEN 1 END) AS exits
+		FROM access_logs
+		WHERE timestamp >= ? AND timestamp < ?
+		  AND event_type IN ('entry', 'exit', 'force_exit')
+		GROUP BY ym
+	`, fyStart, fyNextStart)
+	if err == nil {
+		for rowsYear.Next() {
+			var ym string
+			var en, ex int
+			if err := rowsYear.Scan(&ym, &en, &ex); err == nil {
+				ymMap[ym] = entryExitCount{entries: en, exits: ex}
+			}
+		}
+		rowsYear.Close()
+	}
+
+	fyMonths := []int{4, 5, 6, 7, 8, 9, 10, 11, 12, 1, 2, 3}
+	for _, mNum := range fyMonths {
+		y := fy
+		if mNum < 4 {
+			y = fy + 1
+		}
+		ym := fmt.Sprintf("%04d-%02d", y, mNum)
+		c := ymMap[ym]
+		stats.YearChart = append(stats.YearChart, ChartPoint{
+			Label:   fmt.Sprintf("%d月", mNum),
+			Entries: c.entries,
+			Exits:   c.exits,
+		})
+	}
+
 	return stats, nil
 }
 
-// GetMonthlyStats 月別・区分別打刻統計データの取得 (年月, -, 0教職員, 1学生, 9スタッフ, 当月までの合計、年度指定対応)
+// GetMonthlyStats 月別・区分別打刻統計データの取得 (年月, -, 0教職員, 1学生, 9スタッフ, 当月合計, 当月までの合計、年度指定対応)
 func (m *DBManager) GetMonthlyStats(fiscalYears ...int) (*MonthlyStatsResponse, error) {
 	m.mu.RLock()
 	defer m.mu.RUnlock()
@@ -1045,35 +1187,49 @@ func (m *DBManager) GetMonthlyStats(fiscalYears ...int) (*MonthlyStatsResponse, 
 	var query string
 	var args []interface{}
 
+	roleCaseExpr := `
+		CASE
+			WHEN l.role_name = '教職員' OR (l.role_name != '' AND l.role_name != '未登録' AND l.role_code = 0) THEN 0
+			WHEN l.role_name IN ('学生スタッフ', 'スタッフ') OR (l.role_name != '' AND l.role_name != '未登録' AND l.role_code = 9) THEN 9
+			WHEN l.role_name = '学生' OR (l.role_name != '' AND l.role_name != '未登録' AND l.role_code = 1) THEN 1
+			WHEN u.role_code IS NOT NULL THEN u.role_code
+			WHEN l.user_name != '' AND l.user_name != '未登録' THEN l.role_code
+			ELSE -1
+		END
+	`
+
 	if len(fiscalYears) > 0 && fiscalYears[0] > 0 {
 		fy := fiscalYears[0]
-		startDate := fmt.Sprintf("%d-04-01T00:00:00", fy)
-		endDate := fmt.Sprintf("%d-03-31T23:59:59", fy+1)
-		query = `
+		startDate := fmt.Sprintf("%04d-04-01", fy)
+		endDate := fmt.Sprintf("%04d-04-01", fy+1)
+		query = fmt.Sprintf(`
 		SELECT 
 			substr(l.timestamp, 1, 7) AS ym,
-			COALESCE(NULLIF(l.role_code, 1), u.role_code, -1) AS role_code,
-			COUNT(*) AS cnt
+			%s AS role_code,
+			COUNT(CASE WHEN l.event_type = 'entry' THEN 1 END) AS entry_cnt,
+			COUNT(CASE WHEN l.event_type IN ('exit', 'force_exit') THEN 1 END) AS exit_cnt
 		FROM access_logs l
 		LEFT JOIN registered_users u ON l.card_id = u.card_id AND u.fiscal_year = ?
-		WHERE l.event_type = 'entry' AND l.timestamp >= ? AND l.timestamp <= ?
+		WHERE l.event_type IN ('entry', 'exit', 'force_exit')
+		  AND l.timestamp >= ? AND l.timestamp < ?
 		GROUP BY 1, 2
 		ORDER BY ym ASC
-		`
+		`, roleCaseExpr)
 		args = []interface{}{fy, startDate, endDate}
 	} else {
 		currentFY := CurrentFiscalYear()
-		query = `
+		query = fmt.Sprintf(`
 		SELECT 
 			substr(l.timestamp, 1, 7) AS ym,
-			COALESCE(NULLIF(l.role_code, 1), u.role_code, -1) AS role_code,
-			COUNT(*) AS cnt
+			%s AS role_code,
+			COUNT(CASE WHEN l.event_type = 'entry' THEN 1 END) AS entry_cnt,
+			COUNT(CASE WHEN l.event_type IN ('exit', 'force_exit') THEN 1 END) AS exit_cnt
 		FROM access_logs l
 		LEFT JOIN registered_users u ON l.card_id = u.card_id AND u.fiscal_year = ?
-		WHERE l.event_type = 'entry'
+		WHERE l.event_type IN ('entry', 'exit', 'force_exit')
 		GROUP BY 1, 2
 		ORDER BY ym ASC
-		`
+		`, roleCaseExpr)
 		args = []interface{}{currentFY}
 	}
 
@@ -1089,6 +1245,7 @@ func (m *DBManager) GetMonthlyStats(fiscalYears ...int) (*MonthlyStatsResponse, 
 		role0     int
 		role1     int
 		role9     int
+		exits     int
 	}
 
 	monthMap := make(map[string]*monthGroup)
@@ -1096,8 +1253,8 @@ func (m *DBManager) GetMonthlyStats(fiscalYears ...int) (*MonthlyStatsResponse, 
 
 	for rows.Next() {
 		var ym string
-		var roleCode, cnt int
-		if err := rows.Scan(&ym, &roleCode, &cnt); err != nil {
+		var roleCode, entryCnt, exitCnt int
+		if err := rows.Scan(&ym, &roleCode, &entryCnt, &exitCnt); err != nil {
 			return nil, err
 		}
 		if ym == "" {
@@ -1109,15 +1266,16 @@ func (m *DBManager) GetMonthlyStats(fiscalYears ...int) (*MonthlyStatsResponse, 
 			monthMap[ym] = mg
 			orderedYM = append(orderedYM, ym)
 		}
+		mg.exits += exitCnt
 		switch roleCode {
 		case 0:
-			mg.role0 += cnt
+			mg.role0 += entryCnt
 		case 1:
-			mg.role1 += cnt
+			mg.role1 += entryCnt
 		case 9:
-			mg.role9 += cnt
+			mg.role9 += entryCnt
 		default:
-			mg.roleOther += cnt
+			mg.roleOther += entryCnt
 		}
 	}
 
@@ -1154,6 +1312,9 @@ func (m *DBManager) GetMonthlyStats(fiscalYears ...int) (*MonthlyStatsResponse, 
 		}
 
 		monthlyTotal := mg.roleOther + mg.role0 + mg.role1 + mg.role9
+		if monthlyTotal == 0 && mg.exits == 0 {
+			continue
+		}
 		fyCumulative += monthlyTotal
 
 		qKey := fmt.Sprintf("%d_%s", fiscalYear, quarterPeriod)
@@ -1166,6 +1327,8 @@ func (m *DBManager) GetMonthlyStats(fiscalYears ...int) (*MonthlyStatsResponse, 
 			Role1Count:                mg.role1,
 			Role9Count:                mg.role9,
 			MonthlyTotal:              monthlyTotal,
+			MonthlyExitCount:          mg.exits,
+			MonthlyLogTotal:           monthlyTotal + mg.exits,
 			FiscalYear:                fiscalYear,
 			FiscalYearCumulativeTotal: fyCumulative,
 			QuarterPeriod:             quarterPeriod,
@@ -1198,8 +1361,9 @@ func (m *DBManager) GetCurrentInsideUsers() ([]UserStatus, error) {
 	m.mu.RLock()
 	defer m.mu.RUnlock()
 
-	todayPrefix := time.Now().Format("2006-01-02")
-	todayStart := todayPrefix + "T00:00:00"
+	now := time.Now()
+	todayPrefix := now.Format("2006-01-02")
+	tomorrowPrefix := now.AddDate(0, 0, 1).Format("2006-01-02")
 
 	query := `
 	SELECT 
@@ -1216,17 +1380,16 @@ func (m *DBManager) GetCurrentInsideUsers() ([]UserStatus, error) {
 	) latest ON l.id = latest.max_id
 	LEFT JOIN registered_users u ON l.card_id = u.card_id AND u.fiscal_year = ?
 	WHERE l.event_type = 'entry'
-	  AND (l.timestamp >= ? OR l.timestamp >= ? OR l.timestamp LIKE ?)
+	  AND l.timestamp >= ? AND l.timestamp < ?
 	ORDER BY l.timestamp DESC
 	`
 	currentFY := CurrentFiscalYear()
-	rows, err := m.db.Query(query, currentFY, todayStart, todayPrefix+" 00:00:00", todayPrefix+"%")
+	rows, err := m.db.Query(query, currentFY, todayPrefix, tomorrowPrefix)
 	if err != nil {
 		return nil, err
 	}
 	defer rows.Close()
 
-	now := time.Now()
 	var list []UserStatus
 	for rows.Next() {
 		var s UserStatus
@@ -1269,8 +1432,8 @@ func (m *DBManager) GetFiscalYearLogs(fiscalYear int) ([]AccessLog, error) {
 	m.mu.RLock()
 	defer m.mu.RUnlock()
 
-	startDate := fmt.Sprintf("%d-04-01T00:00:00", fiscalYear)
-	endDate := fmt.Sprintf("%d-03-31T23:59:59", fiscalYear+1)
+	startDate := fmt.Sprintf("%04d-04-01", fiscalYear)
+	endDate := fmt.Sprintf("%04d-04-01", fiscalYear+1)
 
 	query := `
 	SELECT 
@@ -1282,8 +1445,8 @@ func (m *DBManager) GetFiscalYearLogs(fiscalYear int) ([]AccessLog, error) {
 		COALESCE(NULLIF(l.purpose, ''), u.purpose, '') as purpose,
 		l.event_type, l.timestamp, l.duration_second
 	FROM access_logs l
-	LEFT JOIN registered_users u ON (l.card_id = u.card_id OR (l.student_no != '' AND l.student_no = u.student_no)) AND u.fiscal_year = ?
-	WHERE l.timestamp >= ? AND l.timestamp <= ?
+	LEFT JOIN registered_users u ON l.card_id = u.card_id AND u.fiscal_year = ?
+	WHERE l.timestamp >= ? AND l.timestamp < ?
 	ORDER BY l.timestamp ASC
 	`
 	rows, err := m.db.Query(query, fiscalYear, startDate, endDate)
