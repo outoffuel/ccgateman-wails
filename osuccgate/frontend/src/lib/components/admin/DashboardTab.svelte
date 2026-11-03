@@ -169,7 +169,7 @@
           <span class="text-3xl font-bold text-slate-800">{currentInsideNum}</span>
           <span class="text-sm text-slate-600 font-medium">人</span>
         </div>
-        <p class="text-[11px] text-slate-400 mt-1">定員 10人 (本日 入室 {todayEntriesCount} / 退室 {todayExitsCount})</p>
+        <p class="text-[11px] text-slate-400 mt-1">本日 入室 {todayEntriesCount} / 退室 {todayExitsCount}</p>
       </div>
       <div class="w-12 h-12 rounded-xl bg-blue-50 text-blue-600 flex items-center justify-center border border-blue-100 flex-shrink-0">
         <svg class="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24">

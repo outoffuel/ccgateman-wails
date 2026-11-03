@@ -70,9 +70,6 @@
   let modalMode = 'create'; // 'create' | 'edit' | 'renewal'
   let selectedUserForEdit = null;
 
-  // 定員設定 (単一施設)
-  const ROOM_CAPACITY = 10;
-
   let mounted = false;
 
   // ----------------------------------------------------------------
@@ -463,7 +460,6 @@
       {:else if activeTab === 'inside'}
         <InsideTab 
           {insideUsers}
-          roomCapacity={ROOM_CAPACITY}
           onOpenAdvanced={() => isAdvancedOpen = true}
         />
       {:else if activeTab === 'users'}
