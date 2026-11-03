@@ -34,7 +34,26 @@
   let availableFiscalYears = [2026];
 
   // バックエンドデータ状態
-  let stats = { currentInsideCount: 0, totalUserCount: 0, todayLogCount: 0, weekLogCount: 0, monthLogCount: 0, yearLogCount: 0 };
+  let stats = {
+    fiscalYear: 2026,
+    currentInsideCount: 0,
+    totalUserCount: 0,
+    todayLogCount: 0,
+    todayEntryCount: 0,
+    todayExitCount: 0,
+    weekLogCount: 0,
+    weekEntryCount: 0,
+    weekExitCount: 0,
+    monthLogCount: 0,
+    monthEntryCount: 0,
+    monthExitCount: 0,
+    yearLogCount: 0,
+    yearEntryCount: 0,
+    yearExitCount: 0,
+    weekChart: [],
+    monthChart: [],
+    yearChart: []
+  };
   let logs = [];
   let users = [];
   let insideUsers = [];
@@ -43,6 +62,7 @@
   let refreshTimer = null;
   let appVersion = 'dev';
   let isLoading = false;
+  let pendingForceReload = false;
   let lastLoadedTab = null;
 
   // ユーザーモーダル制御
@@ -59,19 +79,25 @@
   // データ読み込み (多重実行防止ガード & タブ別オンデマンド取得 & 年度対応)
   // ----------------------------------------------------------------
   async function loadData(forceAll = false) {
-    if (isLoading) return;
+    if (isLoading) {
+      if (forceAll) {
+        pendingForceReload = true;
+      }
+      return;
+    }
     isLoading = true;
+    const targetFY = selectedFiscalYear;
 
     try {
       // 初回またはタブ切り替え、明示的更新時は全データ取得
       if (forceAll || lastLoadedTab !== activeTab) {
         const [s, l, u, i, m, years] = await Promise.all([
-          GetDashboardStats(selectedFiscalYear).catch(e => { console.warn('GetDashboardStats error:', e); return null; }),
-          GetRecentLogs(500, selectedFiscalYear).catch(e => { console.warn('GetRecentLogs error:', e); return null; }),
-          GetAllUsers(selectedFiscalYear).catch(e => { console.warn('GetAllUsers error:', e); return null; }),
+          GetDashboardStats(targetFY).catch(e => { console.warn('GetDashboardStats error:', e); return null; }),
+          GetRecentLogs(500, targetFY).catch(e => { console.warn('GetRecentLogs error:', e); return null; }),
+          GetAllUsers(targetFY).catch(e => { console.warn('GetAllUsers error:', e); return null; }),
           GetCurrentInsideUsers().catch(e => { console.warn('GetCurrentInsideUsers error:', e); return null; }),
-          GetMonthlyStats(selectedFiscalYear).catch(e => { console.warn('GetMonthlyStats error:', e); return null; }),
-          GetAvailableFiscalYears().catch(e => { console.warn('GetAvailableFiscalYears error:', e); return [selectedFiscalYear]; })
+          GetMonthlyStats(targetFY).catch(e => { console.warn('GetMonthlyStats error:', e); return null; }),
+          GetAvailableFiscalYears().catch(e => { console.warn('GetAvailableFiscalYears error:', e); return [targetFY]; })
         ]);
 
         if (s) stats = s;
@@ -88,17 +114,19 @@
 
       // 5秒ごとの定期ポーリングではアクティブタブに必要なデータのみ最小限に取得
       if (activeTab === 'dashboard') {
-        const [s, l, i] = await Promise.all([
-          GetDashboardStats(selectedFiscalYear).catch(e => { console.warn(e); return null; }),
-          GetRecentLogs(500, selectedFiscalYear).catch(e => { console.warn(e); return null; }),
-          GetCurrentInsideUsers().catch(e => { console.warn(e); return null; })
+        const [s, l, i, m] = await Promise.all([
+          GetDashboardStats(targetFY).catch(e => { console.warn(e); return null; }),
+          GetRecentLogs(500, targetFY).catch(e => { console.warn(e); return null; }),
+          GetCurrentInsideUsers().catch(e => { console.warn(e); return null; }),
+          GetMonthlyStats(targetFY).catch(e => { console.warn(e); return null; })
         ]);
         if (s) stats = s;
         if (l) logs = l;
         if (i) insideUsers = i;
+        if (m?.rows) monthlyStatsRows = m.rows;
       } else if (activeTab === 'logs') {
         const [l, i] = await Promise.all([
-          GetRecentLogs(500, selectedFiscalYear).catch(e => { console.warn(e); return null; }),
+          GetRecentLogs(500, targetFY).catch(e => { console.warn(e); return null; }),
           GetCurrentInsideUsers().catch(e => { console.warn(e); return null; })
         ]);
         if (l) logs = l;
@@ -108,7 +136,7 @@
         if (i) insideUsers = i;
       } else if (activeTab === 'users') {
         const [u, i] = await Promise.all([
-          GetAllUsers(selectedFiscalYear).catch(e => { console.warn(e); return null; }),
+          GetAllUsers(targetFY).catch(e => { console.warn(e); return null; }),
           GetCurrentInsideUsers().catch(e => { console.warn(e); return null; })
         ]);
         if (u) users = u;
@@ -118,6 +146,10 @@
       console.error('Failed to load DB data:', e);
     } finally {
       isLoading = false;
+      if (pendingForceReload) {
+        pendingForceReload = false;
+        loadData(true);
+      }
     }
   }
 
@@ -147,7 +179,7 @@
     if (refreshTimer) clearInterval(refreshTimer);
   });
 
-  // ダッシュボード用の成形済みログ
+  // ダッシュボード・履歴タブ用の成形済みログ
   $: processedLogs = (logs || []).map(l => {
     const formatted = formatLogTime(l.timestamp);
     const hasRegisteredUser = l.userName && l.userName !== '未登録';
@@ -412,6 +444,7 @@
           {monthlyStatsRows}
           {availableFiscalYears}
           {selectedFiscalYear}
+          {currentFiscalYear}
           onSelectFiscalYear={handleSelectFiscalYear}
           onNavigateToLogs={() => activeTab = 'logs'}
           onRenewalUser={handleOpenRenewalUser}
@@ -462,7 +495,7 @@
   {#if isAdvancedOpen}
     <AdvancedOpsModal 
       onClose={() => { isAdvancedOpen = false; }}
-      onRefresh={loadData}
+      onRefresh={() => loadData(true)}
     />
   {/if}
 
