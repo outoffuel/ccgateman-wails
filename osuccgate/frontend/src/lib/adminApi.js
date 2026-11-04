@@ -16,6 +16,7 @@ import {
   GetRecentLogs as wailsGetRecentLogs,
   ImportLogsCSV as wailsImportLogsCSV,
   ImportUsersCSV as wailsImportUsersCSV,
+  SaveCSVContent as wailsSaveCSVContent,
   SaveUser as wailsSaveUser,
   ToggleFullscreen as wailsToggleFullscreen,
   VerifyPIN as wailsVerifyPIN
@@ -170,6 +171,24 @@ export async function ExportFiscalYearLogsCSV(year) {
   link.click();
   URL.revokeObjectURL(url);
   return filename;
+}
+
+export async function SaveCSVContent(defaultFilename, content) {
+  if (isWailsAvailable()) {
+    return wailsSaveCSVContent(defaultFilename, content);
+  }
+  const utf8BOM = '\uFEFF';
+  const csvWithBOM = content.startsWith(utf8BOM) ? content : utf8BOM + content;
+  const blob = new Blob([csvWithBOM], { type: 'text/csv;charset=utf-8;' });
+  const url = URL.createObjectURL(blob);
+  const link = document.createElement('a');
+  link.setAttribute('href', url);
+  link.setAttribute('download', defaultFilename);
+  document.body.appendChild(link);
+  link.click();
+  document.body.removeChild(link);
+  URL.revokeObjectURL(url);
+  return defaultFilename;
 }
 
 export function ImportUsersCSV() {

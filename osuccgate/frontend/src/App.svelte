@@ -33,7 +33,7 @@
   }
 </script>
 
-<main class="w-full min-h-screen overflow-y-auto select-none bg-slate-950">
+<main class="w-full h-screen overflow-hidden select-none bg-m3-surface text-m3-on-surface">
   {#if currentView === 'kiosk'}
     <KioskSwipe onOpenAdmin={handleRequestOpenAdmin} isPaused={isPinModalOpen} />
   {:else if currentView === 'admin'}
@@ -54,7 +54,7 @@
     padding: 0;
     width: 100%;
     height: 100%;
-    overflow-y: auto;
-    background-color: #0f172a;
+    overflow: hidden;
+    background-color: #F8FAFD;
   }
 </style>

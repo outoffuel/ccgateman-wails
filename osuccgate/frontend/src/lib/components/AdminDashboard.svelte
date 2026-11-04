@@ -290,31 +290,35 @@
   }
 </script>
 
-<div class="w-full h-screen flex overflow-hidden bg-slate-50 text-slate-800 select-none font-sans">
+<div class="w-full h-screen flex overflow-hidden bg-m3-surface text-m3-on-surface select-none font-sans">
   
   <!-- ==============================================================
-       画面左側：固定サイドバー (濃紺背景)
+       画面左側：M3 Navigation Drawer (Surface Container Low + Pill Indicator)
        ============================================================== -->
-  <aside class="w-64 bg-slate-900 text-slate-300 flex flex-col flex-shrink-0 z-20 border-r border-slate-800">
+  <aside class="w-64 bg-m3-surface-container-low text-m3-on-surface flex flex-col flex-shrink-0 z-20 border-r border-m3-outline-variant/50">
     <!-- システムヘッダー -->
-    <div class="h-16 flex items-center px-6 border-b border-slate-800 gap-3">
-      <div class="w-8 h-8 rounded-lg bg-blue-600 flex items-center justify-center text-white shadow-sm flex-shrink-0">
-        <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+    <div class="h-18 py-4 flex items-center px-5 gap-3.5">
+      <div class="w-10 h-10 rounded-2xl bg-m3-primary-container text-m3-on-primary-container flex items-center justify-center flex-shrink-0 shadow-m3-1">
+        <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
           <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 15v2m-6 4h12a2 2 0 002-2v-6a2 2 0 00-2-2H6a2 2 0 00-2 2v6a2 2 0 002 2zm10-10V7a4 4 0 00-8 0v4h8z"/>
         </svg>
       </div>
       <div>
-        <h1 class="text-sm font-bold text-white tracking-wide">入退室管理システム</h1>
-        <p class="text-[11px] text-blue-400">クリエイトセンター</p>
+        <h1 class="text-sm font-bold text-m3-on-surface tracking-tight">入退室管理システム</h1>
+        <p class="text-[11px] font-semibold text-m3-primary">クリエイトセンター</p>
       </div>
     </div>
 
-    <!-- サイドバーメニュー -->
-    <nav class="flex-1 px-3 py-4 space-y-1 overflow-y-auto">
+    <!-- M3 Navigation Drawer Items (Active Pill Indicator) -->
+    <nav class="flex-1 px-3 py-2 space-y-1 overflow-y-auto">
+      <div class="px-4 py-1.5 text-[11px] font-bold text-m3-on-surface-variant uppercase tracking-wider">
+        メインメニュー
+      </div>
+
       <!-- 1. ダッシュボード -->
       <button 
         on:click={() => activeTab = 'dashboard'}
-        class="w-full flex items-center gap-3 px-4 py-3 text-sm font-medium rounded-xl transition-all duration-150 {activeTab === 'dashboard' ? 'bg-blue-600 text-white shadow-sm' : 'text-slate-400 hover:text-white hover:bg-slate-800'}"
+        class="w-full flex items-center gap-3.5 px-4 py-3 text-sm rounded-full transition-colors duration-150 {activeTab === 'dashboard' ? 'bg-m3-secondary-container text-m3-on-secondary-container font-bold' : 'text-m3-on-surface-variant font-medium hover:bg-m3-surface-container-high hover:text-m3-on-surface'}"
       >
         <svg class="w-5 h-5 flex-shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24">
           <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 6a2 2 0 012-2h2a2 2 0 012 2v2a2 2 0 01-2 2H6a2 2 0 01-2-2V6zM14 6a2 2 0 012-2h2a2 2 0 012 2v2a2 2 0 01-2 2h-2a2 2 0 01-2-2V6zM4 16a2 2 0 012-2h2a2 2 0 012 2v2a2 2 0 01-2 2H6a2 2 0 01-2-2v-2zM14 16a2 2 0 012-2h2a2 2 0 012 2v2a2 2 0 01-2 2h-2a2 2 0 01-2-2v-2z"/>
@@ -325,7 +329,7 @@
       <!-- 2. 入退室履歴 -->
       <button 
         on:click={() => activeTab = 'logs'}
-        class="w-full flex items-center gap-3 px-4 py-3 text-sm font-medium rounded-xl transition-all duration-150 {activeTab === 'logs' ? 'bg-blue-600 text-white shadow-sm' : 'text-slate-400 hover:text-white hover:bg-slate-800'}"
+        class="w-full flex items-center gap-3.5 px-4 py-3 text-sm rounded-full transition-colors duration-150 {activeTab === 'logs' ? 'bg-m3-secondary-container text-m3-on-secondary-container font-bold' : 'text-m3-on-surface-variant font-medium hover:bg-m3-surface-container-high hover:text-m3-on-surface'}"
       >
         <svg class="w-5 h-5 flex-shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24">
           <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 8v4l3 3m6-3a9 9 0 11-18 0 9 9 0 0118 0z"/>
@@ -336,16 +340,16 @@
       <!-- 3. 在室中メンバー -->
       <button 
         on:click={() => activeTab = 'inside'}
-        class="w-full flex items-center justify-between px-4 py-3 text-sm font-medium rounded-xl transition-all duration-150 {activeTab === 'inside' ? 'bg-blue-600 text-white shadow-sm' : 'text-slate-400 hover:text-white hover:bg-slate-800'}"
+        class="w-full flex items-center justify-between px-4 py-3 text-sm rounded-full transition-colors duration-150 {activeTab === 'inside' ? 'bg-m3-secondary-container text-m3-on-secondary-container font-bold' : 'text-m3-on-surface-variant font-medium hover:bg-m3-surface-container-high hover:text-m3-on-surface'}"
       >
-        <div class="flex items-center gap-3">
+        <div class="flex items-center gap-3.5">
           <svg class="w-5 h-5 flex-shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24">
             <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M17 20h5v-2a3 3 0 00-5.356-1.857M17 20H7m10 0v-2c0-.656-.126-1.283-.356-1.857M7 20H2v-2a3 3 0 015.356-1.857M7 20v-2c0-.656.126-1.283.356-1.857m0 0a5.002 5.002 0 019.288 0M15 7a3 3 0 11-6 0 3 3 0 016 0zm6 3a2 2 0 11-4 0 2 2 0 014 0zM7 10a2 2 0 11-4 0 2 2 0 014 0z"/>
           </svg>
           <span>在室中メンバー</span>
         </div>
         {#if currentInsideNum > 0}
-          <span class="px-2 py-0.5 text-xs font-bold rounded-full {activeTab === 'inside' ? 'bg-white text-blue-600' : 'bg-emerald-500 text-white'}">
+          <span class="px-2.5 py-0.5 text-xs font-bold rounded-full {activeTab === 'inside' ? 'bg-m3-primary text-m3-on-primary' : 'bg-m3-tertiary-container text-m3-on-tertiary-container'}">
             {currentInsideNum}
           </span>
         {/if}
@@ -354,7 +358,7 @@
       <!-- 4. ユーザー管理 (利用者マスター) -->
       <button 
         on:click={() => activeTab = 'users'}
-        class="w-full flex items-center gap-3 px-4 py-3 text-sm font-medium rounded-xl transition-all duration-150 {activeTab === 'users' ? 'bg-blue-600 text-white shadow-sm' : 'text-slate-400 hover:text-white hover:bg-slate-800'}"
+        class="w-full flex items-center gap-3.5 px-4 py-3 text-sm rounded-full transition-colors duration-150 {activeTab === 'users' ? 'bg-m3-secondary-container text-m3-on-secondary-container font-bold' : 'text-m3-on-surface-variant font-medium hover:bg-m3-surface-container-high hover:text-m3-on-surface'}"
       >
         <svg class="w-5 h-5 flex-shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24">
           <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 4.354a4 4 0 110 5.292M15 21H3v-1a6 6 0 0112 0v1zm0 0h6v-1a6 6 0 00-9-5.197M13 7a4 4 0 11-8 0 4 4 0 018 0z"/>
@@ -362,11 +366,15 @@
         <span>ユーザー管理</span>
       </button>
 
-      <!-- 高度な操作 / キオスク復帰 -->
-      <div class="pt-4 mt-4 border-t border-slate-800/80 space-y-1">
+      <!-- システム・キオスク操作セクション -->
+      <div class="pt-4 mt-4 border-t border-m3-outline-variant space-y-1">
+        <div class="px-4 py-1 text-[11px] font-bold text-m3-on-surface-variant uppercase tracking-wider">
+          システム操作
+        </div>
+
         <button 
           on:click={() => isAdvancedOpen = true}
-          class="w-full flex items-center gap-3 px-4 py-2.5 text-xs font-semibold rounded-xl text-slate-400 hover:text-white hover:bg-slate-800 transition"
+          class="w-full flex items-center gap-3.5 px-4 py-2.5 text-xs font-semibold rounded-full text-m3-on-surface-variant hover:text-m3-on-surface hover:bg-m3-surface-container-high transition-colors duration-150"
         >
           <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
             <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M10.325 4.317c.426-1.756 2.924-1.756 3.35 0a1.724 1.724 0 002.573 1.066c1.543-.94 3.31.826 2.37 2.37a1.724 1.724 0 001.065 2.572c1.756.426 1.756 2.924 0 3.35a1.724 1.724 0 00-1.066 2.573c.94 1.543-.826 3.31-2.37 2.37a1.724 1.724 0 00-2.572 1.065c-.426 1.756-2.924 1.756-3.35 0a1.724 1.724 0 00-2.573-1.066c-1.543.94-3.31-.826-2.37-2.37a1.724 1.724 0 00-1.065-2.572c-1.756-.426-1.756-2.924 0-3.35a1.724 1.724 0 001.066-2.573c-.94-1.543.826-3.31 2.37-2.37.996.608 2.296.07 2.572-1.065z"/>
@@ -377,7 +385,7 @@
 
         <button 
           on:click={onBackToKiosk}
-          class="w-full flex items-center gap-3 px-4 py-2.5 text-xs font-semibold rounded-xl text-slate-400 hover:text-white hover:bg-slate-800 transition"
+          class="w-full flex items-center gap-3.5 px-4 py-2.5 text-xs font-semibold rounded-full text-m3-primary hover:bg-m3-primary-container transition-colors duration-150"
         >
           <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
             <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M11 17l-5-5m0 0l5-5m-5 5h12"/>
@@ -388,51 +396,62 @@
     </nav>
 
     <!-- フッター情報 -->
-    <div class="p-4 border-t border-slate-800 text-xs text-slate-500 flex items-center justify-between">
-      <div class="text-[11px] text-slate-500 font-mono">SQLite DB / Wails</div>
-      <div class="text-[11px] text-blue-400 font-mono font-semibold" title="システムバージョン">{appVersion}</div>
+    <div class="p-4 mx-3 mb-3 rounded-2xl bg-m3-surface-container flex items-center justify-between text-xs">
+      <div class="text-[11px] text-m3-on-surface-variant font-mono">SQLite / Wails</div>
+      <div class="text-[11px] px-2 py-0.5 rounded-full bg-m3-primary-container text-m3-on-primary-container font-mono font-bold" title="システムバージョン">
+        {appVersion}
+      </div>
     </div>
   </aside>
 
   <!-- ==============================================================
-       メインコンテンツエリア
+       メインコンテンツエリア (M3 Surface)
        ============================================================== -->
-  <div class="flex-1 flex flex-col min-w-0 overflow-hidden bg-slate-50">
+  <div class="flex-1 flex flex-col min-w-0 overflow-hidden bg-m3-surface">
 
-    <!-- 上部ヘッダー -->
-    <header class="h-16 bg-white border-b border-slate-200 flex items-center justify-between px-8 flex-shrink-0 z-10 shadow-xs">
+    <!-- 上部 M3 Top App Bar (スクロール負荷軽減のためソリッド背景を適用) -->
+    <header class="h-16 bg-m3-surface-container-lowest border-b border-m3-outline-variant/50 flex items-center justify-between px-8 flex-shrink-0 z-10">
       <div class="flex items-center gap-3">
-        <h2 class="text-lg font-bold text-slate-800">
+        <h2 class="text-lg font-bold text-m3-on-surface tracking-tight">
           {activeTab === 'dashboard' ? 'ダッシュボード' : activeTab === 'logs' ? '入退室履歴' : activeTab === 'inside' ? '在室中メンバー' : 'ユーザー管理'}
         </h2>
-        <span class="text-xs bg-blue-50 text-blue-700 px-3 py-1 rounded-full font-semibold border border-blue-100">
+        <!-- M3 Assist Chip: 対象施設 -->
+        <span class="inline-flex items-center gap-1.5 text-xs bg-m3-secondary-container/70 text-m3-on-secondary-container px-3.5 py-1 rounded-full font-semibold">
+          <span class="w-1.5 h-1.5 rounded-full bg-m3-secondary"></span>
           対象施設：クリエイトセンター
+        </span>
+        <!-- M3 Tonal Chip: 選択年度 -->
+        <span class="hidden sm:inline-flex items-center text-xs bg-m3-primary-container/60 text-m3-on-primary-container px-3 py-1 rounded-full font-bold">
+          {selectedFiscalYear}年度
         </span>
       </div>
 
-      <!-- 右側：全画面切替 & 管理者表示 -->
-      <div class="flex items-center gap-4">
+      <!-- 右側：全画面切替 (M3 Outlined Pill Button) & 管理者チップ -->
+      <div class="flex items-center gap-3">
         <button 
           on:click={async () => { await ToggleFullscreen(); }}
-          class="text-xs text-slate-600 hover:text-slate-900 px-3 py-1.5 rounded-lg border border-slate-200 hover:bg-slate-50 transition font-medium"
+          class="m3-btn-outlined py-1.5 px-4 text-xs"
           title="フルスクリーン切り替え (05prompt)"
         >
-          全画面切替
+          <svg class="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 8V4m0 0h4M4 4l5 5m11-1V4m0 0h-4m4 0l-5 5M4 16v4m0 0h4m-4 0l5-5m11 5l-5-5m5 5v-4m0 4h-4"/>
+          </svg>
+          <span>全画面切替</span>
         </button>
 
-        <div class="flex items-center gap-3 pl-2 border-l border-slate-200">
-          <div class="w-9 h-9 rounded-full bg-blue-600 text-white flex items-center justify-center font-bold text-sm shadow-xs">
+        <div class="flex items-center gap-2.5 pl-3 border-l border-m3-outline-variant/60">
+          <div class="w-9 h-9 rounded-full bg-m3-primary-container text-m3-on-primary-container flex items-center justify-center font-bold text-sm">
             <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
               <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M16 7a4 4 0 11-8 0 4 4 0 018 0zM12 14a7 7 0 00-7 7h14a7 7 0 00-7-7z"/>
             </svg>
           </div>
-          <div class="text-sm font-bold text-slate-800">管理者</div>
+          <div class="text-sm font-bold text-m3-on-surface">管理者</div>
         </div>
       </div>
     </header>
 
-    <!-- メインスクロール領域 -->
-    <main class="flex-1 overflow-y-auto p-8 space-y-6">
+    <!-- メインスクロール領域 (GPU合成とスクロール最適化) -->
+    <main class="flex-1 overflow-y-auto p-8 space-y-6 [will-change:scroll-position]">
       {#if activeTab === 'dashboard'}
         <DashboardTab 
           {stats}

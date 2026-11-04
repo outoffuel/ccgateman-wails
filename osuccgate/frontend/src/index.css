@@ -1,3 +1,32 @@
 @tailwind base;
 @tailwind components;
 @tailwind utilities;
+
+@layer base {
+  html, body {
+    @apply bg-m3-surface text-m3-on-surface antialiased;
+    font-family: 'Roboto', 'Noto Sans JP', 'Helvetica Neue', Arial, sans-serif;
+  }
+}
+
+@layer components {
+  /* M3 State Layers & Reusable Tokens (Lightweight for WebKitGTK/WebView2) */
+  .m3-card-elevated {
+    @apply bg-m3-surface-container-lowest rounded-3xl border border-m3-outline-variant shadow-m3-1;
+  }
+  .m3-card-filled {
+    @apply bg-m3-surface-container-low rounded-3xl border border-m3-outline-variant;
+  }
+  .m3-btn-filled {
+    @apply inline-flex items-center justify-center gap-2 rounded-full bg-m3-primary hover:bg-blue-700 text-m3-on-primary font-bold text-xs px-5 py-2.5 shadow-m3-1 transition-colors duration-150 disabled:opacity-50;
+  }
+  .m3-btn-tonal {
+    @apply inline-flex items-center justify-center gap-2 rounded-full bg-m3-secondary-container hover:bg-sky-200 text-m3-on-secondary-container font-bold text-xs px-4 py-2 transition-colors duration-150 disabled:opacity-50;
+  }
+  .m3-btn-outlined {
+    @apply inline-flex items-center justify-center gap-2 rounded-full border border-m3-outline bg-m3-surface-container-lowest hover:bg-m3-surface-container-high active:bg-m3-surface-container-highest text-m3-on-surface-variant font-bold text-xs px-4 py-2 transition-colors duration-150 disabled:opacity-50;
+  }
+  .m3-input-outlined {
+    @apply w-full text-xs px-4 py-2.5 rounded-xl bg-m3-surface-container-lowest border border-m3-outline text-m3-on-surface placeholder:text-m3-on-surface-variant focus:outline-none focus:border-m3-primary focus:ring-2 focus:ring-m3-primary/20 transition-colors duration-150;
+  }
+}
