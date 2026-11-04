@@ -13,7 +13,7 @@
   export let onDeleteUser = () => {};
 
   // 列幅リサイズ
-  let usersWidths = { adminNo: 70, studentNo: 120, name: 120, furigana: 120, gender: 65, roleName: 100, contact: 160, purpose: 140, actions: 90 };
+  let usersWidths = { adminNo: 70, studentNo: 120, name: 120, furigana: 120, gender: 65, roleName: 100, contact: 160, purpose: 140, actions: 100 };
   let isResizing = false;
   let activeResizeCol = null;
   let startX = 0;
@@ -125,18 +125,18 @@
 <div class="space-y-6">
   <div class="flex flex-col sm:flex-row sm:items-center justify-between gap-4">
     <div>
-      <h2 class="text-xl font-bold text-slate-800">ユーザー管理</h2>
-      <p class="text-xs text-slate-500 mt-0.5">クリエイトセンターへの入室を許可する利用者を登録・管理します（列幅調整・ソート対応）</p>
+      <h2 class="text-xl font-bold text-m3-on-surface tracking-tight">ユーザー管理</h2>
+      <p class="text-xs text-m3-on-surface-variant mt-0.5">クリエイトセンターへの入室を許可する利用者を登録・管理します（列幅調整・ソート対応）</p>
     </div>
     <div class="flex items-center gap-3">
-      <!-- 表示年度プルダウン (要件4) -->
-      <div class="flex items-center gap-1.5 bg-white border border-slate-300 rounded-xl px-3 py-1.5 shadow-xs">
-        <label for="users-fiscal-year-select" class="text-xs font-bold text-slate-600 whitespace-nowrap">表示年度:</label>
+      <!-- 表示年度プルダウン (M3 Pill Select) -->
+      <div class="flex items-center gap-2 bg-m3-surface-container-lowest border border-m3-outline-variant rounded-full px-4 py-2 shadow-m3-1">
+        <label for="users-fiscal-year-select" class="text-xs font-bold text-m3-on-surface-variant whitespace-nowrap">表示年度:</label>
         <select 
           id="users-fiscal-year-select" 
           value={selectedFiscalYear} 
           on:change={(e) => onSelectFiscalYear(Number(e.target.value))}
-          class="text-xs font-bold text-blue-700 bg-transparent focus:outline-none cursor-pointer"
+          class="text-xs font-bold text-m3-primary bg-transparent focus:outline-none cursor-pointer"
         >
           {#each availableFiscalYears as fy}
             <option value={fy}>{fy}年度</option>
@@ -144,38 +144,39 @@
         </select>
       </div>
 
-      <!-- 目立つ青色の ＋ 新規登録 ボタン -->
+      <!-- M3 Filled Pill Button: ＋ 新規登録 -->
       <button 
         on:click={onCreateUser}
-        class="px-5 py-2.5 bg-blue-600 hover:bg-blue-700 text-white rounded-xl text-xs font-bold transition shadow-sm flex items-center justify-center gap-1.5"
+        class="m3-btn-filled py-2.5 px-5"
       >
         <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-          <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 6v6m0 0v6m0-6h6m-6 0H6"/>
+          <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2.2" d="M12 6v6m0 0v6m0-6h6m-6 0H6"/>
         </svg>
-        新規登録
+        <span>新規登録</span>
       </button>
     </div>
   </div>
 
   {#if selectedFiscalYear !== currentFiscalYear}
-    <div class="px-4 py-2.5 rounded-xl bg-amber-50 border border-amber-200 text-xs text-amber-800 flex items-center justify-between">
+    <div class="px-5 py-3 rounded-2xl bg-m3-warning-container text-m3-on-warning-container text-xs flex items-center justify-between">
       <div class="flex items-center gap-2">
         <span class="font-bold">⚠️ アーカイブ表示中：</span>
         <span>現在は過去の「{selectedFiscalYear}年度」の登録者マスターを表示しています。</span>
       </div>
       <button 
         on:click={() => onSelectFiscalYear(currentFiscalYear)}
-        class="text-xs font-bold text-amber-900 hover:underline"
+        class="text-xs font-bold underline hover:opacity-80"
       >
         今年度（{currentFiscalYear}年度）に戻る →
       </button>
     </div>
   {/if}
 
-  <!-- 検索 & 区分フィルター -->
-  <div class="bg-white rounded-xl border border-slate-200/90 shadow-sm p-5 flex flex-col md:flex-row md:items-center justify-between gap-4">
-    <div class="relative w-full md:w-80">
-      <span class="absolute inset-y-0 left-0 pl-3.5 flex items-center pointer-events-none text-slate-400">
+  <!-- M3 Search Bar & M3 Segmented Filter Buttons -->
+  <div class="m3-card-elevated p-5 flex flex-col md:flex-row md:items-center justify-between gap-4">
+    <!-- M3 Search Bar -->
+    <div class="relative w-full md:w-88">
+      <span class="absolute inset-y-0 left-0 pl-4 flex items-center pointer-events-none text-m3-on-surface-variant">
         <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
           <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0z"/>
         </svg>
@@ -183,54 +184,75 @@
       <input 
         type="text" 
         bind:value={userSearch}
-        placeholder="氏名、フリガナ、学籍番号で検索" 
-        class="w-full text-xs pl-9 pr-3.5 py-2 border border-slate-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500/20"
+        placeholder="氏名、フリガナ、学籍番号で検索..." 
+        class="w-full text-xs pl-10 pr-4 py-2.5 rounded-full bg-m3-surface-container-high text-m3-on-surface placeholder:text-m3-on-surface-variant/70 focus:outline-none focus:ring-2 focus:ring-m3-primary/30 transition"
       />
     </div>
 
-    <div class="flex items-center gap-2">
-      <span class="text-xs font-semibold text-slate-500 mr-1">区分絞り込み:</span>
-      <div class="inline-flex rounded-lg bg-slate-100 p-0.5 border border-slate-200 text-xs font-medium">
+    <!-- M3 Segmented Filter Buttons -->
+    <div class="flex flex-wrap items-center gap-2.5">
+      <span class="text-xs font-bold text-m3-on-surface-variant">区分絞り込み:</span>
+      <div class="inline-flex rounded-full border border-m3-outline/60 overflow-hidden text-xs font-bold divide-x divide-m3-outline/50 bg-m3-surface-container-lowest">
         <button 
           on:click={() => userRoleFilter = 'all'} 
-          class="px-3.5 py-1.5 rounded-md font-bold transition {userRoleFilter === 'all' ? 'bg-white text-blue-700 shadow-xs' : 'text-slate-600 hover:text-slate-900'}"
-        >すべて</button>
+          class="inline-flex items-center gap-1 px-4 py-1.5 transition-colors duration-150 {userRoleFilter === 'all' ? 'bg-m3-secondary-container text-m3-on-secondary-container' : 'text-m3-on-surface-variant hover:bg-m3-surface-container-high'}"
+        >
+          {#if userRoleFilter === 'all'}
+            <svg class="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2.5" d="M5 13l4 4L19 7"/></svg>
+          {/if}
+          <span>すべて</span>
+        </button>
         <button 
           on:click={() => userRoleFilter = '学生'} 
-          class="px-3.5 py-1.5 rounded-md font-bold transition {userRoleFilter === '学生' ? 'bg-white text-blue-700 shadow-xs' : 'text-slate-600 hover:text-slate-900'}"
-        >学生</button>
+          class="inline-flex items-center gap-1 px-4 py-1.5 transition-colors duration-150 {userRoleFilter === '学生' ? 'bg-m3-secondary-container text-m3-on-secondary-container' : 'text-m3-on-surface-variant hover:bg-m3-surface-container-high'}"
+        >
+          {#if userRoleFilter === '学生'}
+            <svg class="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2.5" d="M5 13l4 4L19 7"/></svg>
+          {/if}
+          <span>学生</span>
+        </button>
         <button 
           on:click={() => userRoleFilter = '教職員'} 
-          class="px-3.5 py-1.5 rounded-md font-bold transition {userRoleFilter === '教職員' ? 'bg-white text-blue-700 shadow-xs' : 'text-slate-600 hover:text-slate-900'}"
-        >教職員</button>
+          class="inline-flex items-center gap-1 px-4 py-1.5 transition-colors duration-150 {userRoleFilter === '教職員' ? 'bg-m3-secondary-container text-m3-on-secondary-container' : 'text-m3-on-surface-variant hover:bg-m3-surface-container-high'}"
+        >
+          {#if userRoleFilter === '教職員'}
+            <svg class="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2.5" d="M5 13l4 4L19 7"/></svg>
+          {/if}
+          <span>教職員</span>
+        </button>
         <button 
           on:click={() => userRoleFilter = '学生スタッフ'} 
-          class="px-3.5 py-1.5 rounded-md font-bold transition {userRoleFilter === '学生スタッフ' ? 'bg-white text-blue-700 shadow-xs' : 'text-slate-600 hover:text-slate-900'}"
-        >スタッフ</button>
+          class="inline-flex items-center gap-1 px-4 py-1.5 transition-colors duration-150 {userRoleFilter === '学生スタッフ' ? 'bg-m3-secondary-container text-m3-on-secondary-container' : 'text-m3-on-surface-variant hover:bg-m3-surface-container-high'}"
+        >
+          {#if userRoleFilter === '学生スタッフ'}
+            <svg class="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2.5" d="M5 13l4 4L19 7"/></svg>
+          {/if}
+          <span>スタッフ</span>
+        </button>
       </div>
     </div>
   </div>
 
-  <!-- テーブル (ソート & 列リサイズ対応 & ページネーション & 個人情報保護) -->
-  <div class="bg-white rounded-xl border border-slate-200/90 shadow-sm overflow-hidden">
+  <!-- M3 Data Table (ソート & 列リサイズ対応 & ページネーション & 個人情報保護) -->
+  <div class="m3-card-elevated overflow-hidden">
     <!-- テーブル上部ステータスバー -->
-    <div class="px-6 py-3.5 border-b border-slate-100 flex flex-wrap items-center justify-between gap-3 bg-slate-50/50">
+    <div class="px-6 py-3.5 border-b border-m3-outline-variant/40 flex flex-wrap items-center justify-between gap-3 bg-m3-surface-container-low/60">
       <div class="flex items-center gap-4">
-        <span class="text-xs font-semibold text-slate-600">
-          登録者：<span class="font-bold text-slate-900">{filteredUsers.length}</span> 人
+        <span class="text-xs font-semibold text-m3-on-surface-variant">
+          登録者：<span class="font-bold text-m3-on-surface">{filteredUsers.length}</span> 人
           {#if filteredUsers.length > 0}
-            <span class="text-slate-400 ml-1">
+            <span class="text-m3-on-surface-variant/80 ml-1">
               ({(userCurrentPage - 1) * usersPerPage + 1}〜{Math.min(userCurrentPage * usersPerPage, filteredUsers.length)}件を表示)
             </span>
           {/if}
         </span>
 
         <!-- 表示件数選択 -->
-        <div class="flex items-center gap-1.5 text-xs text-slate-500">
+        <div class="flex items-center gap-1.5 text-xs text-m3-on-surface-variant">
           <span>表示件数:</span>
           <select 
             bind:value={usersPerPage} 
-            class="bg-white border border-slate-200 text-xs rounded px-2 py-1 focus:outline-none focus:border-blue-500 font-semibold"
+            class="bg-m3-surface-container-lowest border border-m3-outline-variant text-xs rounded-full px-3 py-1 focus:outline-none focus:border-m3-primary font-bold text-m3-on-surface"
           >
             <option value={25}>25件</option>
             <option value={50}>50件</option>
@@ -240,11 +262,11 @@
       </div>
 
       <div class="flex items-center gap-3">
-        <!-- 個人情報一括表示 / 非表示トグルボタン -->
+        <!-- 個人情報一括表示 / 非表示トグルボタン (M3 Assist Chip) -->
         <button 
           type="button"
           on:click={toggleShowAllContacts}
-          class="flex items-center gap-1.5 px-3 py-1 text-xs font-bold rounded-lg border transition {showAllContacts ? 'bg-amber-50 text-amber-800 border-amber-300 hover:bg-amber-100' : 'bg-slate-100 text-slate-600 border-slate-200 hover:bg-slate-200'}"
+          class="inline-flex items-center gap-1.5 px-3.5 py-1.5 text-xs font-bold rounded-full border transition {showAllContacts ? 'bg-m3-warning-container text-m3-on-warning-container border-m3-warning/30' : 'bg-m3-surface-container-highest text-m3-on-surface-variant border-m3-outline-variant/60 hover:bg-m3-secondary-container/50'}"
           title="電話番号やメールアドレスなどの個人情報のマスクを一括切り替え"
         >
           <svg class="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
@@ -262,14 +284,14 @@
 
     <div class="overflow-x-auto">
       <table class="w-full text-left text-xs border-collapse">
-        <thead class="bg-slate-50 text-slate-600 font-bold uppercase tracking-wider border-b border-slate-200">
+        <thead class="bg-m3-surface-container-low text-m3-on-surface-variant font-bold border-b border-m3-outline-variant/60">
           <tr>
             <!-- 管理番号 -->
             <th style="width: {usersWidths.adminNo}px;" class="px-5 py-3.5 relative group select-none">
               <div class="flex items-center justify-between cursor-pointer" on:click={() => handleSort('adminNo')}>
                 <span>No {usersSortKey === 'adminNo' ? (usersSortDir === 'asc' ? '▲' : '▼') : ''}</span>
               </div>
-              <div class="absolute right-0 top-0 bottom-0 w-2 cursor-col-resize hover:bg-blue-400/40" on:mousedown={(e) => startResize(e, 'adminNo')}></div>
+              <div class="absolute right-0 top-0 bottom-0 w-2 cursor-col-resize hover:bg-m3-primary/30" on:mousedown={(e) => startResize(e, 'adminNo')}></div>
             </th>
 
             <!-- 学籍番号/職員番号 -->
@@ -277,7 +299,7 @@
               <div class="flex items-center justify-between cursor-pointer" on:click={() => handleSort('studentNo')}>
                 <span>学籍/職員番号 {usersSortKey === 'studentNo' ? (usersSortDir === 'asc' ? '▲' : '▼') : ''}</span>
               </div>
-              <div class="absolute right-0 top-0 bottom-0 w-2 cursor-col-resize hover:bg-blue-400/40" on:mousedown={(e) => startResize(e, 'studentNo')}></div>
+              <div class="absolute right-0 top-0 bottom-0 w-2 cursor-col-resize hover:bg-m3-primary/30" on:mousedown={(e) => startResize(e, 'studentNo')}></div>
             </th>
 
             <!-- 氏名 -->
@@ -285,7 +307,7 @@
               <div class="flex items-center justify-between cursor-pointer" on:click={() => handleSort('name')}>
                 <span>氏名 {usersSortKey === 'name' ? (usersSortDir === 'asc' ? '▲' : '▼') : ''}</span>
               </div>
-              <div class="absolute right-0 top-0 bottom-0 w-2 cursor-col-resize hover:bg-blue-400/40" on:mousedown={(e) => startResize(e, 'name')}></div>
+              <div class="absolute right-0 top-0 bottom-0 w-2 cursor-col-resize hover:bg-m3-primary/30" on:mousedown={(e) => startResize(e, 'name')}></div>
             </th>
 
             <!-- フリガナ -->
@@ -293,7 +315,7 @@
               <div class="flex items-center justify-between cursor-pointer" on:click={() => handleSort('furigana')}>
                 <span>フリガナ {usersSortKey === 'furigana' ? (usersSortDir === 'asc' ? '▲' : '▼') : ''}</span>
               </div>
-              <div class="absolute right-0 top-0 bottom-0 w-2 cursor-col-resize hover:bg-blue-400/40" on:mousedown={(e) => startResize(e, 'furigana')}></div>
+              <div class="absolute right-0 top-0 bottom-0 w-2 cursor-col-resize hover:bg-m3-primary/30" on:mousedown={(e) => startResize(e, 'furigana')}></div>
             </th>
 
             <!-- 性別 -->
@@ -301,7 +323,7 @@
               <div class="flex items-center justify-center cursor-pointer" on:click={() => handleSort('gender')}>
                 <span>性別 {usersSortKey === 'gender' ? (usersSortDir === 'asc' ? '▲' : '▼') : ''}</span>
               </div>
-              <div class="absolute right-0 top-0 bottom-0 w-2 cursor-col-resize hover:bg-blue-400/40" on:mousedown={(e) => startResize(e, 'gender')}></div>
+              <div class="absolute right-0 top-0 bottom-0 w-2 cursor-col-resize hover:bg-m3-primary/30" on:mousedown={(e) => startResize(e, 'gender')}></div>
             </th>
 
             <!-- 区分 -->
@@ -309,7 +331,7 @@
               <div class="flex items-center justify-between cursor-pointer" on:click={() => handleSort('roleCode')}>
                 <span>区分 {usersSortKey === 'roleCode' ? (usersSortDir === 'asc' ? '▲' : '▼') : ''}</span>
               </div>
-              <div class="absolute right-0 top-0 bottom-0 w-2 cursor-col-resize hover:bg-blue-400/40" on:mousedown={(e) => startResize(e, 'roleName')}></div>
+              <div class="absolute right-0 top-0 bottom-0 w-2 cursor-col-resize hover:bg-m3-primary/30" on:mousedown={(e) => startResize(e, 'roleName')}></div>
             </th>
 
             <!-- 連絡先 (個人情報保護対応) -->
@@ -317,7 +339,7 @@
               <div class="flex items-center justify-between cursor-pointer" on:click={() => handleSort('contact')}>
                 <span>連絡先 {usersSortKey === 'contact' ? (usersSortDir === 'asc' ? '▲' : '▼') : ''}</span>
               </div>
-              <div class="absolute right-0 top-0 bottom-0 w-2 cursor-col-resize hover:bg-blue-400/40" on:mousedown={(e) => startResize(e, 'contact')}></div>
+              <div class="absolute right-0 top-0 bottom-0 w-2 cursor-col-resize hover:bg-m3-primary/30" on:mousedown={(e) => startResize(e, 'contact')}></div>
             </th>
 
             <!-- 利用目的 -->
@@ -325,7 +347,7 @@
               <div class="flex items-center justify-between cursor-pointer" on:click={() => handleSort('purpose')}>
                 <span>利用目的 {usersSortKey === 'purpose' ? (usersSortDir === 'asc' ? '▲' : '▼') : ''}</span>
               </div>
-              <div class="absolute right-0 top-0 bottom-0 w-2 cursor-col-resize hover:bg-blue-400/40" on:mousedown={(e) => startResize(e, 'purpose')}></div>
+              <div class="absolute right-0 top-0 bottom-0 w-2 cursor-col-resize hover:bg-m3-primary/30" on:mousedown={(e) => startResize(e, 'purpose')}></div>
             </th>
 
             <!-- 操作 -->
@@ -334,37 +356,37 @@
             </th>
           </tr>
         </thead>
-        <tbody class="divide-y divide-slate-100">
+        <tbody class="divide-y divide-m3-outline-variant/30">
           {#if filteredUsers.length === 0}
             <tr>
-              <td colspan="9" class="px-6 py-10 text-center text-slate-400 font-medium">該当するユーザーが見つかりませんでした。</td>
+              <td colspan="9" class="px-6 py-10 text-center text-m3-on-surface-variant font-medium">該当するユーザーが見つかりませんでした。</td>
             </tr>
           {:else}
             {#each paginatedUsers as user}
-              <tr class="hover:bg-slate-50/80 transition border-b border-slate-100">
-                <td class="px-5 py-3.5 font-mono text-slate-500">{user.adminNo || '-'}</td>
-                <td class="px-5 py-3.5 font-mono text-slate-700 font-semibold">{user.studentNo}</td>
-                <td class="px-5 py-3.5 font-bold text-slate-800">{user.name}</td>
-                <td class="px-5 py-3.5 text-slate-500 text-[11px]">{user.furigana || '-'}</td>
-                <td class="px-4 py-3.5 text-center text-slate-600">{user.gender || '-'}</td>
+              <tr class="hover:bg-m3-surface-container-high transition-colors duration-150">
+                <td class="px-5 py-3.5 font-mono text-m3-on-surface-variant">{user.adminNo || '-'}</td>
+                <td class="px-5 py-3.5 font-mono text-m3-on-surface font-semibold">{user.studentNo}</td>
+                <td class="px-5 py-3.5 font-bold text-m3-on-surface">{user.name}</td>
+                <td class="px-5 py-3.5 text-m3-on-surface-variant text-[11px]">{user.furigana || '-'}</td>
+                <td class="px-4 py-3.5 text-center text-m3-on-surface-variant">{user.gender || '-'}</td>
                 <td class="px-5 py-3.5">
-                  <span class="inline-block px-2.5 py-0.5 rounded text-xs {user.roleCode === 0 ? 'bg-indigo-50 text-indigo-700 border border-indigo-200 font-bold' : (user.roleCode === 9 ? 'bg-amber-50 text-amber-700 border border-amber-200 font-semibold' : 'bg-slate-100 text-slate-700')}">
+                  <span class="inline-block px-3 py-0.5 rounded-full text-xs font-bold {user.roleCode === 0 ? 'bg-m3-secondary-container text-m3-on-secondary-container' : (user.roleCode === 9 ? 'bg-m3-warning-container text-m3-on-warning-container' : 'bg-m3-primary-container/70 text-m3-on-primary-container')}">
                     {user.roleName || '学生'}
                   </span>
                 </td>
-                <!-- 連絡先セル：未クリック時はマスク表示、クリックで開示 -->
-                <td class="px-5 py-3.5 text-slate-600">
+                <!-- 連絡先セル：未クリック時はマスク表示、クリックで開示 (M3 Assist Chip) -->
+                <td class="px-5 py-3.5 text-m3-on-surface-variant">
                   {#if !user.contact}
-                    <span class="text-slate-400">-</span>
+                    <span class="text-m3-on-surface-variant/60">-</span>
                   {:else if showAllContacts || revealedContacts.has(user.cardId || user.studentNo)}
                     <button 
                       type="button" 
                       on:click={() => toggleContactReveal(user.cardId || user.studentNo)}
-                      class="inline-flex items-center gap-1 text-slate-800 hover:text-blue-600 font-mono text-xs bg-blue-50/60 hover:bg-blue-100/60 px-2 py-0.5 rounded transition text-left"
+                      class="inline-flex items-center gap-1.5 text-m3-on-primary-container font-mono text-xs bg-m3-primary-container/70 hover:bg-m3-primary-container px-2.5 py-0.5 rounded-full transition text-left"
                       title="クリックして再度マスクする"
                     >
                       <span>{user.contact}</span>
-                      <svg class="w-3 h-3 text-blue-500 flex-shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                      <svg class="w-3 h-3 text-m3-primary flex-shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                         <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M15 12a3 3 0 11-6 0 3 3 0 016 0z" />
                         <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M2.458 12C3.732 7.943 7.523 5 12 5c4.478 0 8.268 2.943 9.542 7-1.274 4.057-5.064 7-9.542 7-4.477 0-8.268-2.943-9.542-7z" />
                       </svg>
@@ -373,25 +395,25 @@
                     <button 
                       type="button" 
                       on:click={() => toggleContactReveal(user.cardId || user.studentNo)}
-                      class="inline-flex items-center gap-1 text-slate-400 hover:text-blue-600 font-mono text-xs bg-slate-100 hover:bg-blue-50 px-2 py-0.5 rounded transition cursor-pointer"
+                      class="inline-flex items-center gap-1.5 text-m3-on-surface-variant hover:text-m3-primary font-mono text-xs bg-m3-surface-container-high hover:bg-m3-primary-container/50 px-2.5 py-0.5 rounded-full transition cursor-pointer"
                       title="クリックして電話番号・連絡先を表示"
                     >
                       <span>••••••••</span>
-                      <svg class="w-3 h-3 text-slate-400 group-hover:text-blue-500 flex-shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                      <svg class="w-3 h-3 flex-shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                         <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M13.875 18.825A10.05 10.05 0 0112 19c-4.478 0-8.268-2.943-9.543-7a9.97 9.97 0 011.563-3.029m5.858.908a3 3 0 114.243 4.243M9.878 9.878l4.242 4.242M9.88 9.88l-3.29-3.29m7.532 7.532l3.29 3.29M3 3l18 18" />
                       </svg>
                     </button>
                   {/if}
                 </td>
-                <td class="px-5 py-3.5 text-slate-500 truncate max-w-[140px]">{user.purpose || '-'}</td>
-                <td class="px-5 py-3.5 text-right space-x-1.5 whitespace-nowrap">
+                <td class="px-5 py-3.5 text-m3-on-surface-variant truncate max-w-[140px]">{user.purpose || '-'}</td>
+                <td class="px-5 py-3.5 text-right space-x-1 whitespace-nowrap">
                   <button 
                     on:click={() => onEditUser(user)}
-                    class="px-2 py-1 text-xs font-bold text-blue-600 hover:text-blue-800 hover:bg-blue-50 rounded transition"
+                    class="px-3 py-1 text-xs font-bold text-m3-primary hover:bg-m3-primary-container/60 rounded-full transition"
                   >編集</button>
                   <button 
                     on:click={() => onDeleteUser(user)}
-                    class="px-2 py-1 text-xs font-bold text-rose-600 hover:text-rose-800 hover:bg-rose-50 rounded transition"
+                    class="px-3 py-1 text-xs font-bold text-m3-error hover:bg-m3-error-container/60 rounded-full transition"
                   >削除</button>
                 </td>
               </tr>
@@ -401,11 +423,11 @@
       </table>
     </div>
 
-    <!-- ユーザー管理 ページネーションバー -->
+    <!-- M3 Navigation Controls (ページネーションバー) -->
     {#if totalUserPages > 1}
-      <div class="px-4 sm:px-6 py-3.5 border-t border-slate-100 bg-slate-50/30">
+      <div class="px-4 sm:px-6 py-4 border-t border-m3-outline-variant/40 bg-m3-surface-container-low/40">
         <div class="grid grid-cols-1 md:grid-cols-[1fr_auto_1fr] items-center gap-3">
-          <span class="text-xs text-slate-500 font-medium text-center md:text-left">
+          <span class="text-xs text-m3-on-surface-variant font-medium text-center md:text-left">
             全 {filteredUsers.length} 人 ({userCurrentPage} / {totalUserPages} ページ)
           </span>
           <div class="min-w-0 max-w-full justify-self-center flex flex-wrap items-center justify-center gap-3">
@@ -414,17 +436,17 @@
                 disabled={userCurrentPage === 1}
                 aria-label="前のページ"
                 on:click={() => setUserPage(userCurrentPage - 1)}
-                class="h-8 w-8 rounded border border-slate-300 hover:bg-slate-50 disabled:text-slate-300 disabled:cursor-not-allowed"
+                class="h-8 w-8 rounded-full border border-m3-outline-variant hover:bg-m3-surface-container-high disabled:opacity-40 disabled:cursor-not-allowed font-bold"
               >‹</button>
 
               {#each userPageItems as item (item.key)}
                 {#if item.type === 'ellipsis'}
-                  <span aria-hidden="true" class="w-5 text-center text-slate-500">…</span>
+                  <span aria-hidden="true" class="w-5 text-center text-m3-on-surface-variant">…</span>
                 {:else}
                   <button
                     aria-current={userCurrentPage === item.page ? 'page' : undefined}
                     on:click={() => setUserPage(item.page)}
-                    class="h-8 min-w-8 rounded px-1.5 font-bold {userCurrentPage === item.page ? 'bg-blue-600 text-white' : 'border border-slate-200 hover:bg-slate-50 text-slate-700'}"
+                    class="h-8 min-w-8 rounded-full px-2 font-bold transition-colors duration-150 {userCurrentPage === item.page ? 'bg-m3-primary text-m3-on-primary shadow-m3-1' : 'text-m3-on-surface-variant hover:bg-m3-surface-container-high'}"
                   >
                     {item.page}
                   </button>
@@ -435,11 +457,11 @@
                 disabled={userCurrentPage === totalUserPages}
                 aria-label="次のページ"
                 on:click={() => setUserPage(userCurrentPage + 1)}
-                class="h-8 w-8 rounded border border-slate-300 hover:bg-slate-50 disabled:text-slate-300 disabled:cursor-not-allowed"
+                class="h-8 w-8 rounded-full border border-m3-outline-variant hover:bg-m3-surface-container-high disabled:opacity-40 disabled:cursor-not-allowed font-bold"
               >›</button>
             </nav>
             <form class="flex items-center justify-center gap-2 text-xs" on:submit|preventDefault={() => setUserPage(userPageInput)}>
-              <label for="user-page-input" class="text-slate-600">ページへ移動</label>
+              <label for="user-page-input" class="text-m3-on-surface-variant">ページへ移動</label>
               <input
                 id="user-page-input"
                 type="number"
@@ -447,10 +469,10 @@
                 max={totalUserPages}
                 bind:value={userPageInput}
                 on:change={(event) => setUserPage(event.currentTarget.value)}
-                class="h-8 w-16 rounded border border-slate-300 text-center text-xs focus:outline-none focus:ring-2 focus:ring-blue-500/20"
+                class="h-8 w-16 rounded-full border border-m3-outline-variant bg-m3-surface-container-lowest text-center text-xs focus:outline-none focus:border-m3-primary"
               />
-              <span class="text-slate-500">/ {totalUserPages}</span>
-              <button type="submit" class="h-8 rounded border border-slate-300 px-2 font-semibold text-slate-700 hover:bg-slate-50">移動</button>
+              <span class="text-m3-on-surface-variant">/ {totalUserPages}</span>
+              <button type="submit" class="m3-btn-tonal py-1.5 px-3 text-xs">移動</button>
             </form>
           </div>
           <div class="hidden md:block"></div>
@@ -459,4 +481,3 @@
     {/if}
   </div>
 </div>
-
