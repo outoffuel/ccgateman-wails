@@ -259,6 +259,39 @@ func (a *App) ExportFiscalYearLogsCSV(fiscalYear int) (string, error) {
 	return savePath, nil
 }
 
+// SaveCSVContent 任意のCSV文字列をファイル保存ダイアログ経由でUTF-8(BOM付き)保存する
+func (a *App) SaveCSVContent(defaultFilename string, content string) (string, error) {
+	if strings.TrimSpace(defaultFilename) == "" {
+		defaultFilename = fmt.Sprintf("access_history_%s.csv", time.Now().Format("2006-01-02"))
+	}
+
+	savePath, err := runtime.SaveFileDialog(a.ctx, runtime.SaveDialogOptions{
+		DefaultFilename: defaultFilename,
+		Title:           "CSVファイルの保存",
+		Filters: []runtime.FileFilter{
+			{DisplayName: "CSV Files (*.csv)", Pattern: "*.csv"},
+		},
+	})
+	if err != nil {
+		return "", err
+	}
+	if savePath == "" {
+		return "", nil // キャンセルされた場合
+	}
+
+	// UTF-8 BOM (\xEF\xBB\xBF) が先頭になければ付与する
+	const utf8BOM = "\xEF\xBB\xBF"
+	if !strings.HasPrefix(content, utf8BOM) {
+		content = utf8BOM + content
+	}
+
+	if err := os.WriteFile(savePath, []byte(content), 0644); err != nil {
+		return "", fmt.Errorf("failed to write CSV file: %w", err)
+	}
+
+	return savePath, nil
+}
+
 // ImportUsersCSV 利用者マスターCSVファイルの選択・インポート
 func (a *App) ImportUsersCSV() (string, error) {
 	filePath, err := runtime.OpenFileDialog(a.ctx, runtime.OpenDialogOptions{

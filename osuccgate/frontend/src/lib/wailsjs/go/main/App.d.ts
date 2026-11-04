@@ -40,6 +40,8 @@ export function ImportUsersCSV():Promise<string>;
 
 export function ProcessSwipe(arg1:string):Promise<service.SwipeResponse>;
 
+export function SaveCSVContent(arg1:string,arg2:string):Promise<string>;
+
 export function SaveUser(arg1:db.RegisteredUser):Promise<void>;
 
 export function ToggleFullscreen():Promise<boolean>;

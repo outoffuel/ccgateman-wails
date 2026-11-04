@@ -22,6 +22,10 @@ export function GetAllUsers() {
   return window['go']['main']['App']['GetAllUsers']();
 }
 
+export function SaveCSVContent(arg1, arg2) {
+  return window['go']['main']['App']['SaveCSVContent'](arg1, arg2);
+}
+
 export function SaveUser(arg1) {
   return window['go']['main']['App']['SaveUser'](arg1);
 }

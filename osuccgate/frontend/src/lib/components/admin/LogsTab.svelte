@@ -3,6 +3,7 @@
   import { sortList } from '../../utils/sorting.js';
   import { clampPage, getPageItems } from '../../utils/pagination.js';
   import { formatLogTime } from '../../utils/date.js';
+  import { SaveCSVContent } from '../../adminApi.js';
 
   export let logs = [];
   export let processedLogs = null;
@@ -13,7 +14,7 @@
   export let onRegisterUnregistered = () => {};
 
   // 列幅リサイズ
-  let logsWidths = { timestamp: 155, displayId: 105, userName: 120, result: 70, roleName: 95, purpose: 120, eventType: 95, duration: 95, action: 105 };
+  let logsWidths = { timestamp: 155, displayId: 105, userName: 120, result: 75, roleName: 95, purpose: 120, eventType: 100, duration: 95, action: 110 };
   let isResizing = false;
   let activeResizeCol = null;
   let startX = 0;
@@ -69,7 +70,7 @@
   let filterKeyword = "";
   let logCurrentPage = 1;
   let logPageInput = 1;
-  const LOGS_PER_PAGE = 10;
+  let logsPerPage = 20;
 
   $: effectiveLogs = processedLogs ?? (logs || []).map(l => {
     const formatted = formatLogTime(l.timestamp);
@@ -111,10 +112,10 @@
     return true;
   });
 
-  $: totalLogPages = Math.ceil(filteredLogs.length / LOGS_PER_PAGE) || 1;
+  $: totalLogPages = Math.ceil(filteredLogs.length / logsPerPage) || 1;
   $: logPageItems = getPageItems(totalLogPages, logCurrentPage);
   $: if (logCurrentPage > totalLogPages) setLogPage(totalLogPages);
-  $: paginatedLogs = filteredLogs.slice((logCurrentPage - 1) * LOGS_PER_PAGE, logCurrentPage * LOGS_PER_PAGE);
+  $: paginatedLogs = filteredLogs.slice((logCurrentPage - 1) * logsPerPage, logCurrentPage * logsPerPage);
 
   function setLogPage(page) {
     logCurrentPage = clampPage(page, totalLogPages);
@@ -130,7 +131,7 @@
     setLogPage(1);
   }
 
-  function exportLogsCSV() {
+  async function exportLogsCSV() {
     if (filteredLogs.length === 0) {
       alert("出力対象の履歴がありません。");
       return;
@@ -148,12 +149,28 @@
       `"${l.durationText || ''}"`
     ]);
 
+    const defaultFilename = `access_history_${new Date().toISOString().slice(0, 10)}.csv`;
     const csvContent = "\uFEFF" + [header.join(","), ...rows.map(r => r.join(","))].join("\r\n");
+
+    // Wails ネイティブ環境ではOS標準のファイル保存ダイアログを使用
+    if (typeof window !== 'undefined' && window.go?.main?.App) {
+      try {
+        const savedPath = await SaveCSVContent(defaultFilename, csvContent);
+        if (savedPath) {
+          alert(`CSVファイルを保存しました: ${savedPath}`);
+        }
+      } catch (err) {
+        alert("CSV出力に失敗しました: " + (err?.message || err));
+      }
+      return;
+    }
+
+    // リモートブラウザ閲覧時（Webモード）はBlobダウンロードへフォールバック
     const blob = new Blob([csvContent], { type: "text/csv;charset=utf-8;" });
     const url = URL.createObjectURL(blob);
     const link = document.createElement("a");
     link.setAttribute("href", url);
-    link.setAttribute("download", `access_history_${new Date().toISOString().slice(0, 10)}.csv`);
+    link.setAttribute("download", defaultFilename);
     document.body.appendChild(link);
     link.click();
     document.body.removeChild(link);
@@ -164,18 +181,18 @@
 <div class="space-y-6">
   <div class="flex flex-col sm:flex-row sm:items-center justify-between gap-4">
     <div>
-      <h2 class="text-xl font-bold text-slate-800">入退室履歴</h2>
-      <p class="text-xs text-slate-500 mt-0.5">クリエイトセンターへのすべての入退室ログを検索・一覧確認できます（列ヘッダーでソート・リサイズ可能）</p>
+      <h2 class="text-xl font-bold text-m3-on-surface tracking-tight">入退室履歴</h2>
+      <p class="text-xs text-m3-on-surface-variant mt-0.5">クリエイトセンターへのすべての入退室ログを検索・一覧確認できます（列ヘッダーでソート・リサイズ可能）</p>
     </div>
     <div class="flex items-center gap-3">
-      <!-- 表示年度プルダウン (要件4) -->
-      <div class="flex items-center gap-1.5 bg-white border border-slate-300 rounded-xl px-3 py-1.5 shadow-xs">
-        <label for="logs-fiscal-year-select" class="text-xs font-bold text-slate-600 whitespace-nowrap">表示年度:</label>
+      <!-- 表示年度プルダウン (M3 Pill Select) -->
+      <div class="flex items-center gap-2 bg-m3-surface-container-lowest border border-m3-outline-variant rounded-full px-4 py-2 shadow-m3-1">
+        <label for="logs-fiscal-year-select" class="text-xs font-bold text-m3-on-surface-variant whitespace-nowrap">表示年度:</label>
         <select 
           id="logs-fiscal-year-select" 
           value={selectedFiscalYear} 
           on:change={(e) => onSelectFiscalYear(Number(e.target.value))}
-          class="text-xs font-bold text-blue-700 bg-transparent focus:outline-none cursor-pointer"
+          class="text-xs font-bold text-m3-primary bg-transparent focus:outline-none cursor-pointer"
         >
           {#each availableFiscalYears as fy}
             <option value={fy}>{fy}年度</option>
@@ -185,31 +202,31 @@
 
       <button 
         on:click={exportLogsCSV}
-        class="px-4 py-2 bg-emerald-600 hover:bg-emerald-700 text-white rounded-xl text-xs font-bold transition shadow-xs flex items-center justify-center gap-1.5"
+        class="inline-flex items-center justify-center gap-2 px-5 py-2.5 bg-m3-tertiary text-m3-on-tertiary hover:brightness-105 rounded-full text-xs font-bold transition shadow-m3-1"
       >
         <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
           <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 10v6m0 0l-3-3m3 3l3-3m2 8H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z"/>
         </svg>
-        CSV出力
+        <span>CSV出力</span>
       </button>
     </div>
   </div>
 
-  <!-- 検索・絞り込みエリア -->
-  <div class="bg-white rounded-xl border border-slate-200/90 shadow-sm p-5">
+  <!-- 検索・絞り込みエリア (M3 Card + M3 Search Bar + Outlined Inputs) -->
+  <div class="m3-card-elevated p-5">
     <div class="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-12 gap-4 items-end">
       <div class="lg:col-span-4">
-        <label for="filter-date-start" class="block text-xs font-semibold text-slate-600 mb-1.5">日付指定 (開始日 ～ 終了日)</label>
+        <label for="filter-date-start" class="block text-xs font-bold text-m3-on-surface-variant mb-1.5 ml-1">日付指定 (開始日 ～ 終了日)</label>
         <div class="flex items-center gap-2">
-          <input id="filter-date-start" type="date" bind:value={filterDateStart} class="w-full text-xs px-3 py-2 border border-slate-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500/20" />
-          <span class="text-slate-400 text-xs">～</span>
-          <input id="filter-date-end" type="date" bind:value={filterDateEnd} class="w-full text-xs px-3 py-2 border border-slate-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500/20" />
+          <input id="filter-date-start" type="date" bind:value={filterDateStart} class="m3-input-outlined py-2" />
+          <span class="text-m3-on-surface-variant text-xs">～</span>
+          <input id="filter-date-end" type="date" bind:value={filterDateEnd} class="m3-input-outlined py-2" />
         </div>
       </div>
 
       <div class="lg:col-span-2">
-        <label for="filter-type-select" class="block text-xs font-semibold text-slate-600 mb-1.5">種類</label>
-        <select id="filter-type-select" bind:value={filterType} class="w-full text-xs px-3 py-2 border border-slate-300 rounded-lg bg-white focus:outline-none focus:ring-2 focus:ring-blue-500/20">
+        <label for="filter-type-select" class="block text-xs font-bold text-m3-on-surface-variant mb-1.5 ml-1">種類</label>
+        <select id="filter-type-select" bind:value={filterType} class="m3-input-outlined py-2">
           <option value="all">すべて</option>
           <option value="entry">入室</option>
           <option value="exit">退室</option>
@@ -217,8 +234,8 @@
       </div>
 
       <div class="lg:col-span-2">
-        <label for="filter-role-select" class="block text-xs font-semibold text-slate-600 mb-1.5">区分</label>
-        <select id="filter-role-select" bind:value={filterRole} class="w-full text-xs px-3 py-2 border border-slate-300 rounded-lg bg-white focus:outline-none focus:ring-2 focus:ring-blue-500/20">
+        <label for="filter-role-select" class="block text-xs font-bold text-m3-on-surface-variant mb-1.5 ml-1">区分</label>
+        <select id="filter-role-select" bind:value={filterRole} class="m3-input-outlined py-2">
           <option value="all">すべて</option>
           <option value="学生">学生</option>
           <option value="教職員">教職員</option>
@@ -226,21 +243,35 @@
         </select>
       </div>
 
+      <!-- M3 Search Bar (Pill) -->
       <div class="lg:col-span-2">
-        <label for="filter-keyword-input" class="block text-xs font-semibold text-slate-600 mb-1.5">検索</label>
-        <input id="filter-keyword-input" type="text" bind:value={filterKeyword} placeholder="氏名またはID" class="w-full text-xs px-3 py-2 border border-slate-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500/20" />
+        <label for="filter-keyword-input" class="block text-xs font-bold text-m3-on-surface-variant mb-1.5 ml-1">キーワード検索</label>
+        <div class="relative">
+          <span class="absolute inset-y-0 left-0 pl-3.5 flex items-center pointer-events-none text-m3-on-surface-variant">
+            <svg class="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+              <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0z"/>
+            </svg>
+          </span>
+          <input 
+            id="filter-keyword-input" 
+            type="text" 
+            bind:value={filterKeyword} 
+            placeholder="氏名またはID" 
+            class="w-full text-xs pl-9 pr-3.5 py-2 rounded-full bg-m3-surface-container-high text-m3-on-surface placeholder:text-m3-on-surface-variant/70 focus:outline-none focus:ring-2 focus:ring-m3-primary/30 transition" 
+          />
+        </div>
       </div>
 
       <div class="lg:col-span-2 flex items-center gap-2">
         <button 
           on:click={() => setLogPage(1)}
-          class="flex-1 py-2 bg-blue-600 hover:bg-blue-700 text-white rounded-lg text-xs font-bold transition shadow-xs"
+          class="flex-1 m3-btn-filled py-2 px-4"
         >
           検索
         </button>
         <button 
           on:click={clearLogFilters}
-          class="px-3 py-2 border border-slate-300 bg-white hover:bg-slate-50 text-slate-700 rounded-lg text-xs font-semibold transition"
+          class="m3-btn-outlined py-2 px-3.5"
         >
           クリア
         </button>
@@ -248,25 +279,47 @@
     </div>
   </div>
 
-  <!-- テーブル (ソート & 列リサイズ対応) -->
-  <div class="bg-white rounded-xl border border-slate-200/90 shadow-sm overflow-hidden">
-    <div class="px-6 py-4 border-b border-slate-100 flex items-center justify-between bg-slate-50/50">
-      <span class="text-xs font-semibold text-slate-600">
-        検索結果：<span class="font-bold text-slate-900">{filteredLogs.length}</span> 件
-      </span>
-      <span class="text-xs text-slate-400">※列ヘッダーをクリックでソート、右端をドラッグで幅変更可能</span>
+  <!-- テーブル (M3 Data Table + ソート & 列リサイズ対応) -->
+  <div class="m3-card-elevated overflow-hidden">
+    <div class="px-6 py-4 border-b border-m3-outline-variant/40 flex flex-col sm:flex-row sm:items-center justify-between gap-3 bg-m3-surface-container-low/60">
+      <div class="flex items-center gap-4">
+        <span class="text-xs font-semibold text-m3-on-surface-variant">
+          検索結果：<span class="font-bold text-m3-on-surface">{filteredLogs.length}</span> 件
+          {#if filteredLogs.length > 0}
+            <span class="text-m3-on-surface-variant/80 ml-1">
+              ({(logCurrentPage - 1) * logsPerPage + 1}〜{Math.min(logCurrentPage * logsPerPage, filteredLogs.length)}件を表示)
+            </span>
+          {/if}
+        </span>
+
+        <!-- 表示件数選択 (M3 Pill Select) -->
+        <div class="flex items-center gap-1.5 text-xs text-m3-on-surface-variant">
+          <span>表示件数:</span>
+          <select 
+            bind:value={logsPerPage} 
+            on:change={() => setLogPage(1)}
+            class="bg-m3-surface-container-lowest border border-m3-outline-variant text-xs rounded-full px-3 py-1 focus:outline-none focus:border-m3-primary font-bold text-m3-on-surface cursor-pointer"
+          >
+            <option value={10}>10件</option>
+            <option value={20}>20件</option>
+            <option value={50}>50件</option>
+            <option value={100}>100件</option>
+          </select>
+        </div>
+      </div>
+      <span class="text-xs text-m3-on-surface-variant/80">※列ヘッダーをクリックでソート、右端をドラッグで幅変更可能</span>
     </div>
 
     <div class="overflow-x-auto">
       <table class="w-full text-left text-xs border-collapse">
-        <thead class="bg-slate-50 text-slate-600 font-bold uppercase tracking-wider border-b border-slate-200">
+        <thead class="bg-m3-surface-container-low text-m3-on-surface-variant font-bold border-b border-m3-outline-variant/60">
           <tr>
             <!-- 1. 日時 -->
             <th style="width: {logsWidths.timestamp}px;" class="px-5 py-3.5 relative group select-none">
               <div class="flex items-center justify-between cursor-pointer" on:click={() => handleSort('timestamp')}>
                 <span>日時 {logsSortKey === 'timestamp' ? (logsSortDir === 'asc' ? '▲' : '▼') : ''}</span>
               </div>
-              <div class="absolute right-0 top-0 bottom-0 w-2 cursor-col-resize hover:bg-blue-400/40" on:mousedown={(e) => startResize(e, 'timestamp')}></div>
+              <div class="absolute right-0 top-0 bottom-0 w-2 cursor-col-resize hover:bg-m3-primary/30" on:mousedown={(e) => startResize(e, 'timestamp')}></div>
             </th>
 
             <!-- 2. ID -->
@@ -274,7 +327,7 @@
               <div class="flex items-center justify-between cursor-pointer" on:click={() => handleSort('displayId')}>
                 <span>ID {logsSortKey === 'displayId' ? (logsSortDir === 'asc' ? '▲' : '▼') : ''}</span>
               </div>
-              <div class="absolute right-0 top-0 bottom-0 w-2 cursor-col-resize hover:bg-blue-400/40" on:mousedown={(e) => startResize(e, 'displayId')}></div>
+              <div class="absolute right-0 top-0 bottom-0 w-2 cursor-col-resize hover:bg-m3-primary/30" on:mousedown={(e) => startResize(e, 'displayId')}></div>
             </th>
 
             <!-- 3. 氏名 -->
@@ -282,7 +335,7 @@
               <div class="flex items-center justify-between cursor-pointer" on:click={() => handleSort('userName')}>
                 <span>氏名 {logsSortKey === 'userName' ? (logsSortDir === 'asc' ? '▲' : '▼') : ''}</span>
               </div>
-              <div class="absolute right-0 top-0 bottom-0 w-2 cursor-col-resize hover:bg-blue-400/40" on:mousedown={(e) => startResize(e, 'userName')}></div>
+              <div class="absolute right-0 top-0 bottom-0 w-2 cursor-col-resize hover:bg-m3-primary/30" on:mousedown={(e) => startResize(e, 'userName')}></div>
             </th>
 
             <!-- 4. 判定 -->
@@ -290,7 +343,7 @@
               <div class="flex items-center justify-center cursor-pointer" on:click={() => handleSort('result')}>
                 <span>判定 {logsSortKey === 'result' ? (logsSortDir === 'asc' ? '▲' : '▼') : ''}</span>
               </div>
-              <div class="absolute right-0 top-0 bottom-0 w-2 cursor-col-resize hover:bg-blue-400/40" on:mousedown={(e) => startResize(e, 'result')}></div>
+              <div class="absolute right-0 top-0 bottom-0 w-2 cursor-col-resize hover:bg-m3-primary/30" on:mousedown={(e) => startResize(e, 'result')}></div>
             </th>
 
             <!-- 5. 区分 -->
@@ -298,7 +351,7 @@
               <div class="flex items-center justify-between cursor-pointer" on:click={() => handleSort('roleName')}>
                 <span>区分 {logsSortKey === 'roleName' ? (logsSortDir === 'asc' ? '▲' : '▼') : ''}</span>
               </div>
-              <div class="absolute right-0 top-0 bottom-0 w-2 cursor-col-resize hover:bg-blue-400/40" on:mousedown={(e) => startResize(e, 'roleName')}></div>
+              <div class="absolute right-0 top-0 bottom-0 w-2 cursor-col-resize hover:bg-m3-primary/30" on:mousedown={(e) => startResize(e, 'roleName')}></div>
             </th>
 
             <!-- 6. 利用目的 -->
@@ -306,7 +359,7 @@
               <div class="flex items-center justify-between cursor-pointer" on:click={() => handleSort('purpose')}>
                 <span>利用目的 {logsSortKey === 'purpose' ? (logsSortDir === 'asc' ? '▲' : '▼') : ''}</span>
               </div>
-              <div class="absolute right-0 top-0 bottom-0 w-2 cursor-col-resize hover:bg-blue-400/40" on:mousedown={(e) => startResize(e, 'purpose')}></div>
+              <div class="absolute right-0 top-0 bottom-0 w-2 cursor-col-resize hover:bg-m3-primary/30" on:mousedown={(e) => startResize(e, 'purpose')}></div>
             </th>
 
             <!-- 7. 入退室 -->
@@ -314,7 +367,7 @@
               <div class="flex items-center justify-center cursor-pointer" on:click={() => handleSort('eventType')}>
                 <span>入退室 {logsSortKey === 'eventType' ? (logsSortDir === 'asc' ? '▲' : '▼') : ''}</span>
               </div>
-              <div class="absolute right-0 top-0 bottom-0 w-2 cursor-col-resize hover:bg-blue-400/40" on:mousedown={(e) => startResize(e, 'eventType')}></div>
+              <div class="absolute right-0 top-0 bottom-0 w-2 cursor-col-resize hover:bg-m3-primary/30" on:mousedown={(e) => startResize(e, 'eventType')}></div>
             </th>
 
             <!-- 8. 滞在時間 -->
@@ -322,7 +375,7 @@
               <div class="flex items-center justify-between cursor-pointer" on:click={() => handleSort('durationSecond')}>
                 <span>滞在時間 {logsSortKey === 'durationSecond' ? (logsSortDir === 'asc' ? '▲' : '▼') : ''}</span>
               </div>
-              <div class="absolute right-0 top-0 bottom-0 w-2 cursor-col-resize hover:bg-blue-400/40" on:mousedown={(e) => startResize(e, 'duration')}></div>
+              <div class="absolute right-0 top-0 bottom-0 w-2 cursor-col-resize hover:bg-m3-primary/30" on:mousedown={(e) => startResize(e, 'duration')}></div>
             </th>
 
             <!-- 9. 操作 -->
@@ -330,54 +383,54 @@
               <div class="flex items-center justify-center">
                 <span>操作</span>
               </div>
-              <div class="absolute right-0 top-0 bottom-0 w-2 cursor-col-resize hover:bg-blue-400/40" on:mousedown={(e) => startResize(e, 'action')}></div>
+              <div class="absolute right-0 top-0 bottom-0 w-2 cursor-col-resize hover:bg-m3-primary/30" on:mousedown={(e) => startResize(e, 'action')}></div>
             </th>
           </tr>
         </thead>
-        <tbody class="divide-y divide-slate-100">
+        <tbody class="divide-y divide-m3-outline-variant/30">
           {#if paginatedLogs.length === 0}
             <tr>
-              <td colspan="9" class="px-6 py-10 text-center text-slate-400 font-medium">条件に一致する履歴はありません。</td>
+              <td colspan="9" class="px-6 py-10 text-center text-m3-on-surface-variant font-medium">条件に一致する履歴はありません。</td>
             </tr>
           {:else}
             {#each paginatedLogs as log}
-              <tr class="hover:bg-slate-50/80 transition border-b border-slate-100">
-                <td class="px-5 py-3.5 font-mono text-slate-600">{log.formatted}</td>
-                <td class="px-5 py-3.5 font-mono text-slate-500 font-semibold">{log.displayId || '-'}</td>
-                <td class="px-5 py-3.5 font-bold text-slate-800">{log.userName || '未登録'}</td>
+              <tr class="hover:bg-m3-surface-container-high transition-colors duration-150">
+                <td class="px-5 py-3.5 font-mono text-m3-on-surface-variant">{log.formatted}</td>
+                <td class="px-5 py-3.5 font-mono text-m3-on-surface-variant font-semibold">{log.displayId || '-'}</td>
+                <td class="px-5 py-3.5 font-bold text-m3-on-surface">{log.userName || '未登録'}</td>
                 <td class="px-4 py-3.5 text-center">
-                  <span class="inline-block px-2 py-0.5 rounded text-[11px] font-bold {(log.result === '成功' || log.result === '登録済') ? 'bg-emerald-50 text-emerald-700 border border-emerald-200' : 'bg-rose-50 text-rose-700 border border-rose-200'}">
+                  <span class="inline-block px-2.5 py-0.5 rounded-full text-[11px] font-bold {(log.result === '成功' || log.result === '登録済') ? 'bg-m3-tertiary-container text-m3-on-tertiary-container' : 'bg-m3-error-container text-m3-on-error-container'}">
                     {log.result}
                   </span>
                 </td>
-                <td class="px-5 py-3.5 text-slate-600">{log.roleName || '-'}</td>
-                <td class="px-5 py-3.5 text-slate-500 truncate max-w-[140px]">{log.purpose || '-'}</td>
+                <td class="px-5 py-3.5 text-m3-on-surface-variant">{log.roleName || '-'}</td>
+                <td class="px-5 py-3.5 text-m3-on-surface-variant truncate max-w-[140px]">{log.purpose || '-'}</td>
                 <td class="px-4 py-3.5 text-center">
                   {#if log.eventType === 'unregistered_renewal'}
-                    <span class="inline-block px-2.5 py-0.5 rounded text-[11px] font-bold {log.isRegistered ? 'bg-sky-100 text-sky-800 border border-sky-300' : 'bg-amber-100 text-amber-800 border border-amber-300'}">
+                    <span class="inline-block px-3 py-0.5 rounded-full text-[11px] font-bold {log.isRegistered ? 'bg-m3-secondary-container text-m3-on-secondary-container' : 'bg-m3-warning-container text-m3-on-warning-container'}">
                       {log.typeLabel}
                     </span>
                   {:else if log.eventType === 'unregistered'}
-                    <span class="inline-block px-2.5 py-0.5 rounded text-[11px] font-bold {log.isRegistered ? 'bg-sky-100 text-sky-800 border border-sky-300' : 'bg-rose-100 text-rose-700 border border-rose-300'}">
+                    <span class="inline-block px-3 py-0.5 rounded-full text-[11px] font-bold {log.isRegistered ? 'bg-m3-secondary-container text-m3-on-secondary-container' : 'bg-m3-error-container text-m3-on-error-container'}">
                       {log.typeLabel}
                     </span>
                   {:else}
-                    <span class="inline-block px-2.5 py-0.5 rounded text-xs font-bold {log.eventType === 'entry' ? 'bg-blue-100 text-blue-700' : (log.eventType === 'force_exit' ? 'bg-amber-100 text-amber-700' : 'bg-rose-100 text-rose-700')}">
+                    <span class="inline-block px-3 py-0.5 rounded-full text-xs font-bold {log.eventType === 'entry' ? 'bg-m3-primary-container text-m3-on-primary-container' : (log.eventType === 'force_exit' ? 'bg-m3-warning-container text-m3-on-warning-container' : 'bg-m3-error-container text-m3-on-error-container')}">
                       {log.typeLabel}
                     </span>
                   {/if}
                 </td>
-                <td class="px-5 py-3.5 text-slate-500">{log.durationText || '-'}</td>
+                <td class="px-5 py-3.5 text-m3-on-surface-variant">{log.durationText || '-'}</td>
                 <td class="px-4 py-3.5 text-center whitespace-nowrap">
                   {#if log.eventType === 'unregistered_renewal'}
                     {#if log.isRegistered}
-                      <span class="inline-flex items-center gap-1 text-[11px] font-bold text-emerald-600 bg-emerald-50 px-2 py-0.5 rounded border border-emerald-200">
+                      <span class="inline-flex items-center gap-1 text-[11px] font-bold text-m3-on-tertiary-container bg-m3-tertiary-container px-2.5 py-0.5 rounded-full">
                         ✓ 登録済
                       </span>
                     {:else}
                       <button
                         on:click={() => onRenewalUser(log)}
-                        class="inline-flex items-center gap-1 px-2.5 py-1 bg-amber-500 hover:bg-amber-600 text-white rounded-lg text-[11px] font-bold shadow-xs transition"
+                        class="inline-flex items-center gap-1 px-3 py-1 bg-m3-warning hover:brightness-105 text-m3-on-warning rounded-full text-[11px] font-bold shadow-m3-1 transition"
                         title="前年度の登録情報を引き継いで今年度登録を更新"
                       >
                         <span>🔄</span> 登録更新
@@ -385,20 +438,20 @@
                     {/if}
                   {:else if log.eventType === 'unregistered'}
                     {#if log.isRegistered}
-                      <span class="inline-flex items-center gap-1 text-[11px] font-bold text-emerald-600 bg-emerald-50 px-2 py-0.5 rounded border border-emerald-200">
+                      <span class="inline-flex items-center gap-1 text-[11px] font-bold text-m3-on-tertiary-container bg-m3-tertiary-container px-2.5 py-0.5 rounded-full">
                         ✓ 登録済
                       </span>
                     {:else}
                       <button
                         on:click={() => onRegisterUnregistered(log)}
-                        class="inline-flex items-center gap-1 px-2.5 py-1 bg-blue-600 hover:bg-blue-700 text-white rounded-lg text-[11px] font-bold shadow-xs transition"
+                        class="inline-flex items-center gap-1 px-3 py-1 bg-m3-primary hover:brightness-105 text-m3-on-primary rounded-full text-[11px] font-bold shadow-m3-1 transition"
                         title="読み取られたカードIDで新規登録"
                       >
                         <span>＋</span> 新規登録
                       </button>
                     {/if}
                   {:else}
-                    <span class="text-slate-400">-</span>
+                    <span class="text-m3-on-surface-variant/60">-</span>
                   {/if}
                 </td>
               </tr>
@@ -408,11 +461,11 @@
       </table>
     </div>
 
-    <!-- ページネーション -->
-    <div class="px-4 sm:px-6 py-4 border-t border-slate-100">
+    <!-- M3 Navigation Controls (ページネーション) -->
+    <div class="px-4 sm:px-6 py-4 border-t border-m3-outline-variant/40 bg-m3-surface-container-low/40">
       <div class="grid grid-cols-1 md:grid-cols-[1fr_auto_1fr] items-center gap-3">
-        <div class="text-xs text-slate-500 text-center md:text-left">
-          全 {filteredLogs.length} 件中 {filteredLogs.length > 0 ? (logCurrentPage - 1) * LOGS_PER_PAGE + 1 : 0} ～ {Math.min(logCurrentPage * LOGS_PER_PAGE, filteredLogs.length)} 件を表示
+        <div class="text-xs text-m3-on-surface-variant text-center md:text-left">
+          全 {filteredLogs.length} 件中 {filteredLogs.length > 0 ? (logCurrentPage - 1) * logsPerPage + 1 : 0} ～ {Math.min(logCurrentPage * logsPerPage, filteredLogs.length)} 件を表示
         </div>
         {#if totalLogPages > 1}
           <div class="min-w-0 max-w-full justify-self-center flex flex-wrap items-center justify-center gap-3">
@@ -421,17 +474,17 @@
                 disabled={logCurrentPage === 1}
                 aria-label="前のページ"
                 on:click={() => setLogPage(logCurrentPage - 1)}
-                class="h-8 w-8 rounded border border-slate-300 hover:bg-slate-50 disabled:text-slate-300 disabled:cursor-not-allowed"
+                class="h-8 w-8 rounded-full border border-m3-outline-variant hover:bg-m3-surface-container-high disabled:opacity-40 disabled:cursor-not-allowed font-bold"
               >‹</button>
 
               {#each logPageItems as item (item.key)}
                 {#if item.type === 'ellipsis'}
-                  <span aria-hidden="true" class="w-5 text-center text-slate-500">…</span>
+                  <span aria-hidden="true" class="w-5 text-center text-m3-on-surface-variant">…</span>
                 {:else}
                   <button
                     aria-current={logCurrentPage === item.page ? 'page' : undefined}
                     on:click={() => setLogPage(item.page)}
-                    class="h-8 min-w-8 rounded px-1.5 font-bold {logCurrentPage === item.page ? 'bg-blue-600 text-white' : 'border border-slate-200 hover:bg-slate-50 text-slate-700'}"
+                    class="h-8 min-w-8 rounded-full px-2 font-bold transition-colors duration-150 {logCurrentPage === item.page ? 'bg-m3-primary text-m3-on-primary shadow-m3-1' : 'text-m3-on-surface-variant hover:bg-m3-surface-container-high'}"
                   >
                     {item.page}
                   </button>
@@ -442,11 +495,11 @@
                 disabled={logCurrentPage === totalLogPages}
                 aria-label="次のページ"
                 on:click={() => setLogPage(logCurrentPage + 1)}
-                class="h-8 w-8 rounded border border-slate-300 hover:bg-slate-50 disabled:text-slate-300 disabled:cursor-not-allowed"
+                class="h-8 w-8 rounded-full border border-m3-outline-variant hover:bg-m3-surface-container-high disabled:opacity-40 disabled:cursor-not-allowed font-bold"
               >›</button>
             </nav>
             <form class="flex items-center justify-center gap-2 text-xs" on:submit|preventDefault={() => setLogPage(logPageInput)}>
-              <label for="log-page-input" class="text-slate-600">ページへ移動</label>
+              <label for="log-page-input" class="text-m3-on-surface-variant">ページへ移動</label>
               <input
                 id="log-page-input"
                 type="number"
@@ -454,10 +507,10 @@
                 max={totalLogPages}
                 bind:value={logPageInput}
                 on:change={(event) => setLogPage(event.currentTarget.value)}
-                class="h-8 w-16 rounded border border-slate-300 text-center text-xs focus:outline-none focus:ring-2 focus:ring-blue-500/20"
+                class="h-8 w-16 rounded-full border border-m3-outline-variant bg-m3-surface-container-lowest text-center text-xs focus:outline-none focus:border-m3-primary"
               />
-              <span class="text-slate-500">/ {totalLogPages}</span>
-              <button type="submit" class="h-8 rounded border border-slate-300 px-2 font-semibold text-slate-700 hover:bg-slate-50">移動</button>
+              <span class="text-m3-on-surface-variant">/ {totalLogPages}</span>
+              <button type="submit" class="m3-btn-tonal py-1.5 px-3 text-xs">移動</button>
             </form>
           </div>
         {/if}
@@ -466,4 +519,3 @@
     </div>
   </div>
 </div>
-
